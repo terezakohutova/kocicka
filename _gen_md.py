@@ -1,0 +1,179 @@
+"""Builds KOCICKA.md with the real kocicka.py source embedded, so the two never drift.
+
+Run it after every change to kocicka.py:   python _gen_md.py
+"""
+import re
+from pathlib import Path
+
+HERE = Path(__file__).parent
+source = (HERE / "kocicka.py").read_text(encoding="utf-8")
+code = source.rstrip()
+# the doc quotes these, so read them out of the source instead of retyping them
+END_HOUR = int(re.search(r"^WORK_END = (\d+)", source, re.M).group(1))
+GOAL = int(re.search(r"^WATER_GOAL = (\d+)", source, re.M).group(1))
+AWAY_MIN = int(re.search(r"^AWAY_AFTER = (\d+)", source, re.M).group(1)) // 60
+
+DOC = """# Kočka na plochu
+
+Kočička na vozíčku, která ti jezdí po spodku obrazovky a hlídá tě při práci.
+Během dne se projíždí, olizuje se, mňouká, chodí se napít mlíčka a povídá ti povzbuzující
+(a hodně kočičí) hlody. Jednou za hodinu **skutečné práce** tě zastaví, zvětší se, zvedne
+ceduli STOP a odpočítá 30 vteřin, během kterých tě vede protahováním a dýcháním.
+Odpoledne ti řekne, ať to zavřeš.
+
+Nic neinstaluje, nic neposílá na internet, nic o tobě nesbírá. Je to jeden soubor,
+který běží u tebe na počítači.
+
+**Při prvním spuštění se tě zeptá, jakou má mít barvu a jak se bude jmenovat.** Pak už
+se neptá nikdy, pamatuje si to a vrací se pořád stejná.
+
+---
+
+## Co k tomu potřebuješ
+
+Jenom **Python**. Nic dalšího, žádné instalace balíčků.
+
+- Napiš do vyhledávání ve Windows `Microsoft Store`, najdi **Python 3** a dej Získat.
+- Nebo stáhni z [python.org/downloads](https://www.python.org/downloads/). Při instalaci
+  zaškrtni **„Add python.exe to PATH"**, to je důležité.
+
+Ověříš to tak, že v Příkazovém řádku napíšeš `python --version` a vypíše se ti číslo verze.
+
+---
+
+## Jak ji spustit
+
+1. Udělej si někde složku, třeba `C:\\kocka`.
+2. Zkopíruj kód úplně dole a ulož ho do té složky jako **`kocicka.py`**
+   (v Poznámkovém bloku: Soubor -> Uložit jako -> Typ souboru: **Všechny soubory**, jinak
+   z toho udělá `kocicka.py.txt` a nepůjde to spustit).
+3. Do stejné složky ulož druhý soubor jako **`kocicka.bat`** s tímhle obsahem:
+
+   ```bat
+   @echo off
+   start "" pythonw "%~dp0kocicka.py"
+   ```
+
+4. Dvojklik na **`kocicka.bat`**.
+5. Vyskočí uvítací okénko. Vybereš barvu, napíšeš jméno, dáš „Pojď ke mně!".
+   Pak se tě ještě jednou denně zeptá, co je dneska ta jedna věc, kterou chceš stihnout.
+   (Můžeš to nechat prázdné, nevadí.)
+
+Vedle se vytvoří soubor `kocka.json`, kde si pamatuje jméno, barvu, kolik jste spolu dní
+a kolikrát ses dneska napila. Nikam se neposílá.
+
+Aby ti naskakovala sama po zapnutí počítače: stiskni **Win+R**, napiš `shell:startup`,
+Enter, a do té složky hoď zástupce na `kocicka.bat` (pravý klik -> Kopírovat, pak
+pravý klik ve složce -> Vložit zástupce).
+
+---
+
+## Co dělá
+
+**Sama od sebe**
+
+| | |
+|---|---|
+| **Jezdí** | projíždí se po spodku obrazovky, od krajů se odrazí a otočí |
+| **Olizuje se** | zvedne packu k tlamičce a zavře oči, jak se to dělá |
+| **Mňouká** | otevře pusinku a mňoukne |
+| **Pije mlíčko** | postaví si před sebe misku a sehne se k ní |
+| **Žere trávu** | a pak z toho většinou vyblije chlupy. Jak to u koček chodí |
+| **Vyleze z vozíku** | občas si ho sundá a na chvíli si zdřímne vedle něj |
+| **Otočí se k tobě zadkem** | protože je kočka. Co uvidíš, uvidíš |
+| **Povídá** | každých pár minut jeden povzbuzující kočičí hlod |
+| **Dýchá a mrká** | pořád, i když zrovna nic nedělá |
+| **Večer usne** | od 22:00 do 7:00 svěsí hlavu, zavře oči a nad ní stoupá Zzz |
+
+**Umí poznat, jestli jsi u počítače**
+
+Když {away} minut nesáhneš na myš ani klávesnici, usne a přestane mluvit. Nemá smysl
+ukazovat ceduli do prázdné místnosti. Až se vrátíš, protáhne se a všimne si tě.
+
+Hodina do pauzy se jí kvůli tomu počítá jenom z **doby, kdy tam opravdu jsi**, ne
+podle hodin na zdi. Hodina na obědě se nepočítá.
+
+**Když sdílíš obrazovku, schová se**
+
+Jakmile jde nějaká aplikace přes celou obrazovku (prezentace, hovor, video), zmizí.
+Když ji zavřeš, vrátí se. Takže tě neztrapní na meetingu.
+
+**Jednou za hodinu práce: pauza**
+
+Zvětší se na dvojnásobek, zvedne ceduli **STOP / teď pauzička** a spustí odpočet
+30 vteřin. Během něj tě vede protahováním, každých pár vteřin novou větou
+(„ramena dozadu a dolů", „koukni se z okna na něco daleko", „protáhni krk"...).
+Zároveň se jí nafukuje a splaskává tělo v rytmu **4-7-8** (nádech 4 vteřiny, zadrž 7,
+výdech 8) a na ceduli píše, ve které fázi jsi. Dýchej podle kočky, ne podle textu.
+
+**V {end}:00 ti řekne, ať toho necháš**
+
+Jednou denně udělá delší verzi téhle cedule: **ŠICHTA KONČÍ / hotovo. zavři to.**
+Pak si lehne. Kdyby ti to vycházelo blbě, změň nahoře v souboru `WORK_END = {end}`.
+
+**Hlídá ti pití**
+
+V menu je `napila jsem se`. Nebo když zrovna pije mlíčko, klikni jí na misku, to je
+totéž. Odpoledne ti řekne, jak na tom jste. Cíl je {goal} skleniček, pak přestane rýpat.
+
+**Jedna věc na dnešek**
+
+Ráno se zeptá, co je dneska ta jedna věc. Máš ji pak nahoře v menu. Když ji máš
+hotovou, klikni na ni a je z toho `hotovo:`. Zítra se zeptá znovu.
+
+**Když na ni sáhneš**
+
+| Akce | Co udělá |
+|---|---|
+| **Levý klik** | dá packu a něco ti řekne |
+| **Tažení myší** | přesuneš ji po šířce obrazovky |
+| **Pravý klik** | celé menu: dnešní věc, pojď sem, dej packu, mlíčko, napila jsem se, řekni něco, dáme pauzu, vozíček, přejmenovat / barva, zavřít |
+
+---
+
+## Když si to chceš rozmyslet
+
+**Jiné jméno nebo barva** -> pravý klik -> `přejmenovat / barva`. Otevře se stejné okénko
+jako na začátku.
+
+**Úplně od nuly** -> smaž vedle ležící `kocka.json` a pusť ji znova. Zeptá se jako poprvé.
+
+**Chodí po čtyřech místo vozíčku** -> pravý klik -> odškrtni `vozíček`.
+
+**Nechci čekat hodinu, chci tu pauzu vidět teď** -> pravý klik -> `dáme pauzu`.
+Nebo pusť `python kocicka.py --demo`, to zrychlí časovače.
+
+---
+
+## Kdyby něco nefungovalo
+
+**Sedí na hlavním panelu nebo plave nad ním.** Otevři `kocicka.py` v Poznámkovém bloku
+a nahoře změň číslo u `TASKBAR = 60`. Větší číslo = výš nad panelem.
+
+**Zmizela a nevrací se.** Nejspíš si myslí, že sdílíš obrazovku. Přepni na normální
+okno (ne přes celou obrazovku) a do vteřiny je zpátky.
+
+**Je kolem ní růžový obdélník.** Průhlednost pozadí umí jenom Windows. Na Macu nebo
+Linuxu bude mít kolem sebe čtverec, jinak funguje stejně (jen nepozná, že jsi od stolu).
+
+**Dvojklik na `kocicka.bat` jenom blikne a nic se nestane.** Nejspíš není Python v PATH.
+Přeinstaluj ho a zaškrtni „Add python.exe to PATH".
+
+**Chci ověřit, že je soubor v pořádku.** V Příkazovém řádku ve složce spusť
+`python kocicka.py --selftest`. Když vypíše `ok`, je všechno jak má být.
+
+---
+
+## Kód
+
+Ulož jako `kocicka.py`:
+
+```python
+{code}
+```
+"""
+
+out = HERE / "KOCICKA.md"
+out.write_text(DOC.format(code=code, end=END_HOUR, goal=GOAL, away=AWAY_MIN), encoding="utf-8")
+print("KOCICKA.md: konec smeny %d:00, cil %d sklenic, odchod po %d min" %
+      (END_HOUR, GOAL, AWAY_MIN))

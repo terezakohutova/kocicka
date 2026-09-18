@@ -1,0 +1,9 @@
+# Her memory on this machine: name, colour, days together, today's focus note,
+# water count. Personal and changes daily, so it stays out of git.
+kocka.json
+
+__pycache__/
+
+# verification leftovers
+_check.png
+_blind/
