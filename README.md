@@ -54,6 +54,16 @@ start "" pythonw "%~dp0kocicka.py"
 To have her start with the machine, put a shortcut to that `.bat` in
 `shell:startup`.
 
+## Getting new versions
+
+She never phones home, so she will not tell you when a newer one exists - that
+is on purpose. Click **Watch -> Custom -> Releases** at the top of this page and
+GitHub will mail you when one comes out.
+
+To update, overwrite your `kocicka.py` with the new one and leave the
+`kocka.json` next to it alone - it keeps her name, her colour and your water
+count. Then restart her, the running one keeps the old behaviour until you do.
+
 ## Controls
 
 | | |
@@ -126,6 +136,11 @@ minut ti řekne něco povzbuzujícího. Jednou za hodinu **skutečné práce** t
 zastaví, zvedne ceduli STOP a vede tě protahováním a dýcháním 4-7-8.
 Odpoledne ti řekne, ať to zavřeš. Pozná, když nejsi u počítače, a schová se,
 když sdílíš obrazovku.
+
+**Nové verze:** sama se ti neozve, na internet nesahá. Klikni nahoře na
+**Watch -> Custom -> Releases** a GitHub ti napíše mail, až nějaká vyjde. Update
+znamená přepsat `kocicka.py` tím novým, `kocka.json` vedle nechat být (drží
+jméno, barvu i vodu) a kočičku restartovat.
 
 **Chceš přispět?** Viz [CONTRIBUTING.md](CONTRIBUTING.md). Nejvíc by teď
 pomohly překlady hlášek a podpora macOS a Linuxu.
