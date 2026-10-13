@@ -71,8 +71,9 @@ caught three real bugs that the self-test happily passed.
   Czech right now and addressed to a woman. An English table in her voice
   (not a word-for-word translation) would roughly double who can use her;
   it also needs a small way to pick the language, which does not exist yet.
-- **macOS and Linux.** Transparent backgrounds, idle detection, fullscreen
-  detection and the taskbar position are Windows-only today.
+- **macOS and Linux.** Transparent backgrounds, fullscreen detection and the
+  taskbar position are Windows-only today. Idle detection works on macOS and on
+  Linux under X11 with `xprintidle`; Wayland has no answer yet.
 - **More poses.** They are self-contained: add a state to `TRICKS`, give it
   a duration in `DURATION`, draw it in `draw()`, and check it on the pose
   sheet.

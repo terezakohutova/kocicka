@@ -63,12 +63,12 @@ class CountingWork(Seeded):
             self.assertEqual(p.step(NOW + i, NOON, away=True), "away")
         self.assertEqual(p.worked, 600.0)
 
-    def test_night_does_not_count_and_never_breaks(self):
+    def test_night_counts_too_while_she_dozes(self):
         p = working_pet()
-        p.worked = K.PAUSE_EVERY - 1
+        p.worked = 100.0
         for i in range(1, 100):
             self.assertEqual(p.step(NOW + i, 23), "sleep")
-        self.assertEqual(p.worked, K.PAUSE_EVERY - 1)
+        self.assertAlmostEqual(p.worked, 199.0, msg="a night owl's hour is still an hour")
 
     def test_clock_going_backwards_does_not_subtract(self):
         p = working_pet()
@@ -763,7 +763,7 @@ class Sensing(unittest.TestCase):
 
     def test_without_windows_apis_she_assumes_you_are_there_and_nothing_is_fullscreen(self):
         with mock.patch.object(K, "_win32", return_value=(None, None)):
-            self.assertEqual(K.idle_seconds(), 0.0)
+            self.assertEqual(K.idle_seconds("win32"), 0.0)
             self.assertFalse(K.fullscreen_in_front())
             self.assertEqual(K.work_area(1920, 1080), (0, 0, 1920, 1080 - K.TASKBAR))
 
@@ -820,6 +820,298 @@ class SelfCheck(unittest.TestCase):
     def test_rect_structs_match_windows(self):
         self.assertEqual(ctypes.sizeof(K._RECT), 16)
         self.assertEqual(ctypes.sizeof(K._MONITORINFO), 40)
+
+
+# --------------------------------------------------------------------------- review fixes
+
+class AwayIsABreak(Seeded):
+    def test_time_away_from_the_desk_counts_as_your_break(self):
+        p = working_pet()
+        p.worked = K.PAUSE_EVERY - 60
+        for i in range(1, 600):
+            p.step(NOW + i, NOON, away=True)
+        p.step(NOW + 600, NOON)
+        self.assertLess(p.worked, 5, "a walk round the block is a break")
+        self.assertIn(p.say, S["back"], "and she says hello")
+
+    def test_a_blip_shorter_than_a_break_is_not_a_break(self):
+        p = working_pet()
+        p.worked = 1000.0
+        with mock.patch.object(K, "AWAY_AFTER", 5):
+            for i in range(1, 4):
+                p.step(NOW + i, NOON, away=True)
+            p.step(NOW + 4, NOON)
+        self.assertGreaterEqual(p.worked, 1000.0)
+
+    def test_coming_back_at_night_she_stays_quiet(self):
+        p = working_pet()
+        p.worked = 1000.0
+        for i in range(1, 400):
+            p.step(NOW + i, 23, away=True)
+        p.say = ""
+        p.step(NOW + 400, 23)
+        self.assertLess(p.worked, 5)
+        self.assertEqual(p.say, "")
+
+
+class NightOwls(Seeded):
+    def test_work_at_night_counts_and_still_gets_a_break(self):
+        p = working_pet()
+        p.worked = K.PAUSE_EVERY - 3
+        states = [p.step(NOW + i, 23) for i in range(1, 6)]
+        self.assertEqual(states[0], "sleep", "she dozes while you work")
+        self.assertIn("pause", states, "but she still gets you up once an hour")
+
+    def test_no_pep_talks_at_night(self):
+        p = working_pet()
+        p.next_line = NOW
+        for i in range(1, 50):
+            p.step(NOW + i, 2)
+        self.assertEqual(p.say, "")
+
+    def test_no_end_of_day_sign_at_night(self):
+        app = K.Companion({"name": "M"}, FailingStore(), working_pet(), TODAY, NOW)
+        app.pet.total = K.END_AFTER_WORK * 2
+        app.slow(NOW, 23, TODAY, 0.0, False)
+        self.assertNotEqual(app.pet.state, "pause")
+
+
+class RememberingWork(AppTest):
+    def restart(self, now, cfg=None):
+        cfg = self.store.load() if cfg is None else cfg
+        return K.Companion(cfg, self.store, working_pet(now), TODAY, now)
+
+    def test_work_time_survives_a_restart_the_same_day(self):
+        app = self.app()
+        now = self.work(app, 1200)
+        app.remember_work(now)
+        again = self.restart(now + 5)
+        self.assertAlmostEqual(again.pet.worked, 1200.0)
+        self.assertAlmostEqual(again.worked_today(), 1200.0)
+
+    def test_she_writes_it_down_every_so_often_on_her_own(self):
+        app = self.app()
+        now = self.work(app, 120)
+        app.slow(now, NOON, TODAY, 0.0, False)
+        self.assertAlmostEqual(self.store.load()["work"]["worked"], 120.0)
+
+    def test_yesterdays_work_starts_fresh(self):
+        cfg = {"name": "M", "work": {"date": "2026-10-12", "at": NOW, "worked": 900.0,
+                                     "today": 5000.0}}
+        again = self.restart(NOW + 5, cfg)
+        self.assertEqual((again.pet.worked, again.worked_today()), (0.0, 0.0))
+
+    def test_a_long_gap_between_runs_was_a_break_but_the_day_still_counts(self):
+        cfg = {"name": "M", "work": {"date": TODAY, "at": NOW, "worked": 900.0,
+                                     "today": 5000.0}}
+        again = self.restart(NOW + K.AWAY_AFTER + 1, cfg)
+        self.assertEqual(again.pet.worked, 0.0)
+        self.assertAlmostEqual(again.worked_today(), 5000.0)
+
+    def test_nonsense_on_disk_is_ignored(self):
+        for work in ("lots", [], {"date": TODAY, "at": NOW, "worked": "a", "today": None},
+                     {"date": TODAY, "at": NOW, "worked": -5, "today": -1}):
+            again = self.restart(NOW + 1, {"name": "M", "work": work})
+            self.assertEqual((again.pet.worked, again.worked_today()), (0.0, 0.0), work)
+
+
+class SnoozeOnTheClock(AppTest):
+    def test_break_in_ten_minutes_is_ten_minutes_on_the_clock(self):
+        app = self.app()
+        app.pet.start_pause(NOW)
+        app.snooze(NOW + 1)
+        app.pet.last_step = NOW + 1
+        t = NOW + 1
+        while t + 5 < NOW + 1 + K.SNOOZE:     # a frame every 5 s, so worked crawls
+            t += 5
+            self.assertNotEqual(app.pet.step(t, NOON), "pause")
+        self.assertEqual(app.pet.step(NOW + 1 + K.SNOOZE, NOON), "pause")
+
+    def test_snoozing_a_break_that_is_nearly_due(self):
+        app = self.app()
+        app.pet.worked = K.PAUSE_EVERY - 30
+        app.snooze(NOW)
+        self.assertNotEqual(app.pet.step(NOW + K.SNOOZE - 1, NOON), "pause")
+        self.assertEqual(app.pet.step(NOW + K.SNOOZE, NOON), "pause")
+
+    def test_skip_cancels_a_snoozed_break(self):
+        app = self.app()
+        app.pet.start_pause(NOW)
+        app.snooze(NOW + 1)
+        app.skip(NOW + 2)
+        self.assertNotEqual(app.pet.step(NOW + 2 + K.SNOOZE, NOON), "pause")
+
+    def test_the_words_follow_snooze(self):
+        self.assertNotIn("10", S["menu_snooze"])
+        self.assertNotIn("deset", S["snoozed"])
+        for secs, want in ((600, "10 minut"), (300, "5 minut"), (120, "2 minuty"),
+                           (60, "1 minutu")):
+            with mock.patch.object(K, "SNOOZE", secs):
+                self.assertIn(want, K.snooze_label())
+                app = self.app()
+                app.snooze(NOW)
+                self.assertIn(want, app.pet.say)
+
+
+class SingleInstance(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.path = Path(self.folder.name) / "kocka.lock"
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_a_second_copy_is_turned_away_until_the_first_one_leaves(self):
+        first = K.FileLock(self.path)
+        self.assertTrue(first.acquire())
+        self.assertFalse(K.FileLock(self.path).acquire())
+        first.release()
+        self.assertFalse(self.path.exists())
+        self.assertTrue(K.FileLock(self.path).acquire())
+
+    def test_a_lock_left_by_a_crashed_copy_is_taken_over(self):
+        self.path.write_text("999999", encoding="utf-8")
+        with mock.patch.object(K, "pid_alive", return_value=False):
+            self.assertTrue(K.FileLock(self.path).acquire())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), str(K.os.getpid()))
+        self.path.write_text("not a pid", encoding="utf-8")
+        self.assertTrue(K.FileLock(self.path).acquire())
+
+    def test_she_knows_she_is_alive(self):
+        self.assertTrue(K.pid_alive(K.os.getpid()))
+        self.assertFalse(K.pid_alive(0))
+
+    @unittest.skipUnless(sys.platform == "win32", "named mutex is Windows only")
+    def test_windows_uses_a_named_mutex(self):
+        first = K.single_instance(self.path)
+        self.assertIsNotNone(first)
+        self.assertIsNone(K.single_instance(self.path))
+        first.release()
+        again = K.single_instance(self.path)
+        self.assertIsNotNone(again)
+        again.release()
+
+    def test_two_writers_never_share_a_temp_file(self):
+        store = K.Store(Path(self.folder.name) / "kocka.json", legacy=None)
+        used = []
+        real = K.os.replace
+
+        def spy(src, dst):
+            used.append(Path(src).name)
+            return real(src, dst)
+
+        with mock.patch.object(K.os, "replace", side_effect=spy):
+            store.save({"name": "a"})
+            store.save({"name": "b"})
+        self.assertEqual(len(set(used)), 2, used)
+        self.assertNotIn("kocka.json.tmp", used)
+
+
+class Tidying(AppTest):
+    def test_dpi_is_only_reported_when_windows_said_yes(self):
+        def fake(per_monitor, system):
+            w = mock.Mock()
+            w.shcore.SetProcessDpiAwareness.return_value = per_monitor
+            w.user32.SetProcessDPIAware.return_value = system
+            return w
+
+        for per_monitor, system, want in ((0, 1, "per-monitor"), (-2147024891, 1, "system"),
+                                          (-2147024891, 0, "none")):
+            with mock.patch.object(K.ctypes, "windll", fake(per_monitor, system), create=True):
+                self.assertEqual(K.set_dpi_awareness(), want)
+
+    def test_a_corrupt_file_never_overwrites_a_good_backup(self):
+        self.store.save({"name": "Micka"})
+        self.store.save({"name": "Mourek"})
+        self.store.path.write_text("{ half writ", encoding="utf-8")
+        cfg = self.store.load()
+        self.assertTrue(self.store.save(cfg))
+        self.assertEqual(K._read_json(self.store.backup), {"name": "Micka"})
+        self.assertEqual(self.store.load(), {"name": "Micka"})
+
+    def test_the_work_area_is_given_once(self):
+        app = K.Companion({"name": "M"}, self.store, working_pet(), TODAY, NOW,
+                          area=(0, 0, 1280, 760))
+        self.assertEqual(app.area, (0, 0, 1280, 760))
+
+
+class IdleEverywhere(unittest.TestCase):
+    def setUp(self):
+        K._IDLE_CACHE.update(at=-1e18, value=0.0)
+
+    def run_gives(self, out, code=0):
+        return mock.Mock(return_value=mock.Mock(stdout=out, returncode=code))
+
+    def test_macos_reads_hid_idle_time(self):
+        run = self.run_gives('  |   "HIDIdleTime" = 12500000000\n')
+        self.assertEqual(K.idle_seconds("darwin", run=run), 12.5)
+        self.assertEqual(run.call_args[0][0][0], "ioreg")
+        self.assertIn("timeout", run.call_args[1])
+
+    def test_linux_x11_uses_xprintidle_when_it_is_there(self):
+        run = self.run_gives("4200\n")
+        self.assertEqual(K.idle_seconds("linux", run=run, which=lambda n: "/usr/bin/" + n),
+                         4.2)
+        K._IDLE_CACHE.update(at=-1e18, value=0.0)
+        self.assertEqual(K.idle_seconds("linux", run=run, which=lambda n: None), 0.0,
+                         "no xprintidle: she can't tell, so she assumes you are there")
+
+    def test_anything_odd_means_zero_not_a_crash(self):
+        import subprocess
+        for run in (self.run_gives("nonsense"), self.run_gives("", code=1),
+                    mock.Mock(side_effect=OSError),
+                    mock.Mock(side_effect=subprocess.TimeoutExpired("x", 2))):
+            K._IDLE_CACHE.update(at=-1e18, value=0.0)
+            self.assertEqual(K.idle_seconds("darwin", run=run), 0.0)
+
+    def test_she_asks_the_os_only_every_few_seconds(self):
+        run = self.run_gives('"HIDIdleTime" = 1000000000')
+        clock = iter([100.0, 101.0, 100.0 + K.IDLE_EVERY])
+        for _ in range(3):
+            K.idle_seconds("darwin", run=run, clock=lambda: next(clock))
+        self.assertEqual(run.call_count, 2)
+
+
+class FocusQuestion(unittest.TestCase):
+    """The morning question must not freeze her: it answers through a callback."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import tkinter as tk
+            cls.root = tk.Tk()
+        except Exception as e:  # ImportError without Tk, TclError without a display
+            raise unittest.SkipTest("no Tk display: %s" % e) from e
+        cls.root.withdraw()
+        cls.tk = tk
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.root.destroy()
+
+    def widgets(self, win, kind):
+        found, todo = [], list(win.winfo_children())
+        while todo:
+            w = todo.pop()
+            found.append(w)
+            todo.extend(w.winfo_children())
+        return next(w for w in found if isinstance(w, kind))
+
+    def test_asking_returns_at_once_and_answers_later(self):
+        got = []
+        win = K.ask_focus(self.root, got.append)
+        self.assertEqual(got, [], "nothing answered yet, and nothing blocked")
+        self.widgets(win, self.tk.Entry).insert(0, "daně")
+        self.widgets(win, self.tk.Button).invoke()
+        self.assertEqual(got, ["daně"])
+        self.assertFalse(win.winfo_exists())
+
+    def test_closing_the_question_is_an_empty_answer(self):
+        got = []
+        win = K.ask_focus(self.root, got.append)
+        self.root.tk.eval(win.protocol("WM_DELETE_WINDOW"))
+        self.assertEqual(got, [None])
+        self.assertFalse(win.winfo_exists())
 
 
 # --------------------------------------------------------------------------- drawing
@@ -880,6 +1172,19 @@ class Drawing(unittest.TestCase):
                     self.assertEqual(has["eyes_open"], not has["eyes_shut"], why)
                     self.assertEqual(has["mouth"], state in ("meow", "hairball"), why)
                     self.assertEqual(has["tongue"], state in ("lick", "milk", "grass"), why)
+
+    def test_no_text_straight_on_the_see_through_background(self):
+        # antialiased text on the magenta colour key leaves pink fringes; text only ever
+        # sits on her white bubble or her sign
+        c = self.canvas()
+        for state in ("sleep", "away", "rest", "idle", "pause"):
+            for k in (1.0, 1.5):
+                p = working_pet()
+                p.state, p.say = state, "mrrr"
+                K.draw(c, p, 30, k)
+                loose = [c.itemcget(i, "text") for i in c.find_all() if c.type(i) == "text"
+                         and not set(c.gettags(i)) & {"bubble", "sign"}]
+                self.assertEqual(loose, [], (state, k))
 
     def test_the_bowl_is_drawn_where_a_click_finds_it(self):
         c = self.canvas()

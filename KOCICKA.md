@@ -71,7 +71,7 @@ pravý klik ve složce -> Vložit zástupce).
 | **Otočí se k tobě zadkem** | protože je kočka. Co uvidíš, uvidíš |
 | **Povídá** | každých pár minut jeden povzbuzující kočičí hlod |
 | **Dýchá a mrká** | pořád, i když zrovna nic nedělá |
-| **Večer usne** | od 22:00 do 7:00 svěsí hlavu, zavře oči a nad ní stoupá Zzz |
+| **Večer usne** | od 22:00 do 7:00 svěsí hlavu, zavře oči a nad ní stoupá Zzz. Když pracuješ i v noci, počítá ti to dál a pauzu ti dá taky |
 
 **Umí poznat, jestli jsi u počítače**
 
@@ -79,7 +79,9 @@ Když 5 minut nesáhneš na myš ani klávesnici, usne a přestane mluvit. Nemá
 ukazovat ceduli do prázdné místnosti. Až se vrátíš, protáhne se a všimne si tě.
 
 Hodina do pauzy se jí kvůli tomu počítá jenom z **doby, kdy tam opravdu jsi**, ne
-podle hodin na zdi. Hodina na obědě se nepočítá.
+podle hodin na zdi. A když jsi byla pryč, bere to jako pauzu: hodina se počítá znovu
+od nuly. Na Macu to pozná taky, na Linuxu jen s nainstalovaným `xprintidle`.
+Když ji vypneš a zase pustíš, pamatuje si, kolik jsi toho dneska odpracovala.
 
 **Když jde něco přes celou obrazovku, schová se**
 
@@ -150,8 +152,8 @@ takže by neměla. Na Macu a Linuxu otevři `kocicka.py` a nahoře změň čísl
 normální okno (ne přes celou obrazovku) a do vteřiny je zpátky.
 
 **Je kolem ní světlý obdélník.** Průhlednost pozadí umí jenom Windows. Na Macu nebo
-Linuxu bude mít kolem sebe krémový čtverec, jinak funguje stejně (jen nepozná, že jsi
-od stolu a neschová se při sdílení obrazovky).
+Linuxu bude mít kolem sebe krémový čtverec, jinak funguje stejně (jen se neschová
+za aplikací přes celou obrazovku).
 
 **Dvojklik na `kocicka.bat` jenom blikne a nic se nestane.** Nejspíš není Python v PATH.
 Přeinstaluj ho a zaškrtni „Add python.exe to PATH".
@@ -185,11 +187,14 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import hashlib
 import json
 import math
 import os
 import random
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -205,19 +210,23 @@ TICK = 40            # ms per frame while she rolls, coughs or holds the sign (t
 TICK_SLEEP = 250     # ms per frame while she sleeps or naps: nothing moves fast then
 TICK_HIDDEN = 500    # ms per frame while she is hidden: only the counting goes on
 SLOW_EVERY = 1.0     # seconds between the expensive OS checks
+IDLE_EVERY = 5.0     # macOS and Linux: seconds between asking the OS how long you've been idle
+SAVE_WORK_EVERY = 60  # seconds between writing today's work time down, so a restart keeps it
 LINE_EVERY = (180, 420)   # seconds between her little pep talks
 PAUSE_EVERY = 3600        # seconds of ACTUAL work between the big stop-everything breaks
 PAUSE_SECS = 30           # how long a break lasts
-SNOOZE = 600              # "later" from the menu pushes the break this far off
+SNOOZE = 600              # "later" from the menu brings the break back this many seconds from now
 END_SECS = 45             # how long the end-of-day wind-down lasts
 END_AFTER_WORK = 1800     # no end-of-day sign until you've worked this long today
 PAUSE_ZOOM = 2.0          # how much bigger she gets while holding the sign
 PAUSE_EXTRA = 60          # headroom the window grows so the sign clears her ears
 COACH_EVERY = 6           # seconds each stretch prompt stays up during the countdown
-AWAY_AFTER = 300          # no keyboard or mouse for this long and she assumes you left
+AWAY_AFTER = 300          # no keyboard or mouse for this long and she assumes you left;
+                          # coming back after that counts as your break
 WORK_END = 16             # hour she calls it a day and tells you to close the laptop
 WATER_GOAL = 6            # glasses before she stops nagging
-NIGHT = (22, 7)           # sleeps from 22:00 to 07:00
+NIGHT = (22, 7)           # dozes from 22:00 to 07:00: no pep talks, no end-of-day sign, but
+                          # your work still counts and night owls still get their break
 
 PALETTES = {         # fur, shading/legs, nose
     "zrzava": ("#e8a75c", "#b9702e", "#f2a0a8"),
@@ -356,6 +365,7 @@ STRINGS = {
     "missed_you": "chyběla jsi mi! %s jsme se neviděly",
     "day_n": "zase já. jsme spolu %d. den",
     "days": ("den", "dny", "dní"),                 # 1, 2-4, 5+
+    "minutes": ("minutu", "minuty", "minut"),      # "za" 1, 2-4, 5+
     "water_none": "dneska ses ještě nenapila. ani jednou. koukám",
     "water_some": "dneska jsme to daly %d×. na kočku dobrý, na člověka málo",
     "water_count": "%d. dneska. ještě %d",
@@ -367,9 +377,10 @@ STRINGS = {
     "focus_undo": "tak jo, jedem dál",
     "focus_title": "Jedna věc",
     "focus_ask": "Co je dneska ta jedna věc, kterou chceš mít hotovou?",
+    "focus_ok": "jdu na to",
     "renamed": "teď jsem %s",
     "skipped": "dobře, tentokrát ne. ale příště jo",
-    "snoozed": "tak za deset minut. budu to hlídat",
+    "snoozed": "tak za %s. budu to hlídat",          # %s: SNOOZE in minutes
     "cant_save": "nemůžu si nic zapamatovat, nejde mi zapisovat do složky",
     # the welcome window
     "welcome_title": "Vítej!",
@@ -387,7 +398,7 @@ STRINGS = {
     "menu_say": "řekni něco",
     "menu_break": "dáme pauzu",
     "menu_skip": "přeskočit pauzu",
-    "menu_snooze": "pauzu až za 10 minut",
+    "menu_snooze": "pauzu až za %s",
     "menu_cart": "vozíček",
     "menu_rename": "přejmenovat / barva",
     "menu_close": "zavřít",
@@ -455,13 +466,40 @@ def _box(r: _RECT) -> tuple:
     return (r.left, r.top, r.right, r.bottom)
 
 
-def idle_seconds() -> float:
-    """Seconds since you last touched the keyboard or mouse. 0 where we can't tell."""
-    user32, kernel32 = _win32()
-    if not user32 or not user32.GetLastInputInfo(ctypes.byref(_LII)):
+_IDLE_CACHE = {"at": -1e18, "value": 0.0}
+
+
+def _ask_idle(platform: str, run, which) -> float:
+    """macOS: ioreg's HIDIdleTime (nanoseconds). Linux: xprintidle (milliseconds), which
+    only answers under X11 and only if it is installed. 0 for anything else."""
+    if platform == "darwin":
+        cmd, pattern, unit = ["ioreg", "-c", "IOHIDSystem"], r'"HIDIdleTime" = (\d+)', 1e9
+    elif platform.startswith("linux") and which("xprintidle"):
+        cmd, pattern, unit = ["xprintidle"], r"^\s*(\d+)\s*$", 1e3
+    else:
         return 0.0
-    # GetTickCount wraps every 49 days, so subtract inside 32 bits or she thinks you left
-    return ((kernel32.GetTickCount() - _LII.dwTime) % (2 ** 32)) / 1000.0
+    try:
+        done = run(cmd, capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return 0.0
+    found = re.search(pattern, done.stdout or "") if done.returncode == 0 else None
+    return int(found.group(1)) / unit if found else 0.0
+
+
+def idle_seconds(platform: str = sys.platform, run=None, which=shutil.which,
+                 clock=time.monotonic) -> float:
+    """Seconds since you last touched the keyboard or mouse. 0 where we can't tell, which
+    means she assumes you are there: Wayland, or Linux without xprintidle."""
+    if platform.startswith("win"):
+        user32, kernel32 = _win32()
+        if not user32 or not user32.GetLastInputInfo(ctypes.byref(_LII)):
+            return 0.0
+        # GetTickCount wraps every 49 days, so subtract inside 32 bits or she thinks you left
+        return ((kernel32.GetTickCount() - _LII.dwTime) % (2 ** 32)) / 1000.0
+    now = clock()                              # elsewhere it costs a little program, so
+    if now - _IDLE_CACHE["at"] >= IDLE_EVERY:  # she asks every few seconds, not every one
+        _IDLE_CACHE.update(at=now, value=_ask_idle(platform, run or subprocess.run, which))
+    return _IDLE_CACHE["value"]
 
 
 def covers(window: tuple, monitor: tuple) -> bool:
@@ -517,16 +555,13 @@ def set_dpi_awareness() -> str:
         windll = ctypes.windll
     except AttributeError:
         return "not windows"
-    try:
-        windll.shcore.SetProcessDpiAwareness(2)          # per-monitor (Windows 8.1+)
-        return "per-monitor"
-    except (AttributeError, OSError):
-        pass
-    try:
-        windll.user32.SetProcessDPIAware()               # system-wide (Vista+)
-        return "system"
-    except (AttributeError, OSError):
-        return "none"
+    with contextlib.suppress(AttributeError, OSError):
+        if windll.shcore.SetProcessDpiAwareness(2) == 0:     # per-monitor (8.1+), S_OK
+            return "per-monitor"
+    with contextlib.suppress(AttributeError, OSError):
+        if windll.user32.SetProcessDPIAware():               # system-wide (Vista+), BOOL
+            return "system"
+    return "none"
 
 
 # --------------------------------------------------------------------------- behaviour
@@ -549,6 +584,8 @@ class Pet:
         self.next_line = time.time() + random.uniform(*LINE_EVERY)
         self.worked = 0.0    # seconds of real work since her last break
         self.total = 0.0     # seconds of real work since she started, never reset
+        self.away_since = 0.0  # when she noticed you had gone, 0 while you are here
+        self.due_at = 0.0    # a snoozed break comes back at this time on the clock, 0 = none
         self.last_step = 0.0
         self.kind = "break"  # which sign the current pause is showing
         self.pause_until = 0.0
@@ -592,7 +629,7 @@ class Pet:
         prompts = STRINGS["pause_coach" if kind == "break" else "end_coach"]
         self.state, self.dir, self.say, self.kind = "pause", 1, "", kind
         self.pause_until, self.pause_span = now + span, float(span)
-        self.worked = 0.0
+        self.worked, self.due_at = 0.0, 0.0
         self.coach = random.sample(prompts, k=min(len(prompts), max(1, span // COACH_EVERY)))
 
     def finish_pause(self, now: float, lie_down: bool = True) -> None:
@@ -632,9 +669,17 @@ class Pet:
         else:
             self.breath, self.breath_word = 1.0 - (cycle - 11) / 8.0, exhale
 
+    def break_due(self, now: float) -> bool:
+        """An hour of work is full, or a snoozed break's ten minutes on the clock are up."""
+        if self.due_at:
+            return now >= self.due_at
+        return self.worked >= PAUSE_EVERY
+
     def step(self, now: float, hour: int, away: bool = False, hidden: bool = False) -> str:
         """Advance her by one frame. While hidden (a fullscreen app is in front) your work
-        still counts, but she keeps quiet and a due break waits until she is back."""
+        still counts, but she keeps quiet and a due break waits until she is back. Time
+        away from the desk is a break of its own. At night she dozes, but your work
+        still counts and a break still comes."""
         dt = min(2.0, max(0.0, now - self.last_step)) if self.last_step else 0.0
         self.last_step = now
         if self.say and now > self.say_until:
@@ -646,30 +691,37 @@ class Pet:
                 self.finish_pause(now)
             return self.state
 
-        if self.asleep(hour):
-            self.state = "sleep"
-            # keep sliding the timer, or she'd blurt a pep talk the second she wakes up
-            self.next_line = now + random.uniform(*LINE_EVERY)
-            return self.state
+        night = self.asleep(hour)
         if away:
             self.state = "away"                # nobody to talk to, so she naps instead
+            self.away_since = self.away_since or now
             self.next_line = now + random.uniform(*LINE_EVERY)
             return self.state
-        if self.state in ("sleep", "away"):
-            if self.state == "away":
+        if self.state == "away":
+            # you were gone AWAY_AFTER before she noticed, plus however long since
+            if now - (self.away_since or now) + AWAY_AFTER >= PAUSE_SECS:
+                self.worked, self.due_at = 0.0, 0.0    # that was your break
+            self.state, self.until = "idle", 0.0
+            if not night:
                 self.do("idle", now, 3)        # a beat to notice you, before anything else
                 self.speak(random.choice(STRINGS["back"]), now, 5)
-            else:
-                self.state, self.until = "idle", 0.0
+        self.away_since = 0.0
 
         self.worked += dt                      # only counts while you are actually here
         self.total += dt
         if hidden:                             # nobody can see her: count, but say nothing
             self.next_line = max(self.next_line, now + 5)
             return self.state
-        if self.worked >= PAUSE_EVERY:
+        if self.break_due(now):
             self.start_pause(now)
             return self.state
+        if night:
+            self.state = "sleep"
+            # keep sliding the timer, or she'd blurt a pep talk the second she wakes up
+            self.next_line = now + random.uniform(*LINE_EVERY)
+            return self.state
+        if self.state == "sleep":
+            self.state, self.until = "idle", 0.0
         if now >= self.next_line:
             self.chatter(now)
             self.next_line = now + random.uniform(*LINE_EVERY)
@@ -935,10 +987,16 @@ def draw(c, pet, frame, k=1.0):
         oval(hx + 3, ey + 12, hx + 9, ey + 17, fill=pink, outline="")       # toe bean
 
     zoom_canvas(c, k)
-    if napping:                                # text goes on after the zoom, at final size
-        for i, s in enumerate("zZz"):
-            c.create_text(fx(hx + 20 + i * 13) * k, (hy - 32 - i * 13 - (frame // 6) % 7) * k,
-                          text=s, fill="#7fb2e0", font=(FONT, -round((12 + i * 4) * k), "bold"),
+    if napping:                                # drawn after the zoom, at final size
+        for i in range(3):
+            # drawn as lines, not text: antialiased text on the see-through colour key
+            # leaves a pink fringe, plain lines don't
+            size = (9 + i * 3) * k
+            cx = fx(hx + 20 + i * 13) * k
+            cy = (hy - 32 - i * 13 - (frame // 6) % 7) * k
+            left, right, top, bottom = cx - size / 2, cx + size / 2, cy - size / 2, cy + size / 2
+            c.create_line(left, top, right, top, left, bottom, right, bottom, fill="#7fb2e0",
+                          width=max(2, round(2 * k)), capstyle="round", joinstyle="round",
                           tags=("zzz",))
 
     draw_bubble(c, pet, hy, k)
@@ -1031,26 +1089,142 @@ class Store:
 
     def save(self, cfg: dict) -> bool:
         """True if it reached the disk. A read-only folder is not an error: she runs on."""
-        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp = None
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with open(tmp, "w", encoding="utf-8") as fh:
+            # a temp name of its own every time, so two writers never trip over each other
+            fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=self.path.name + ".",
+                                       suffix=".tmp")
+            with open(fd, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps(cfg, ensure_ascii=False, indent=2))
                 fh.flush()
                 os.fsync(fh.fileno())
-            if self.path.exists():
-                shutil.copy2(self.path, self.backup)
+            if _read_json(self.path) is not None:   # never back up a broken file over a
+                shutil.copy2(self.path, self.backup)  # good backup
             os.replace(tmp, self.path)
             return True
         except OSError:
-            with contextlib.suppress(OSError):
-                tmp.unlink()
+            if tmp:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
             return False
 
 
+# --------------------------------------------------------------------------- only one of her
+
+def pid_alive(pid: int) -> bool:
+    """True if a process with this id is still running."""
+    if pid <= 0:
+        return False
+    if sys.platform.startswith("win"):
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = ctypes.c_void_p
+        k32.OpenProcess.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32)
+        k32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32))
+        k32.CloseHandle.argtypes = (ctypes.c_void_p,)
+        handle = k32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5        # access denied: it exists, not ours
+        code = ctypes.c_uint32()
+        try:
+            return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
+        finally:
+            k32.CloseHandle(handle)                    # 259 is STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True                                    # someone else's, but alive
+    except OSError:
+        return False
+    return True
+
+
+class FileLock:
+    """A file holding the pid of the copy that is running. A lock left behind by a copy
+    that crashed is noticed (that pid is gone) and taken over."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.held = False
+
+    def acquire(self) -> bool:
+        for _ in range(2):
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    pid = int(self.path.read_text(encoding="utf-8").strip())
+                except (OSError, ValueError):
+                    pid = 0
+                if pid_alive(pid):
+                    return False               # she is already on your screen
+                with contextlib.suppress(OSError):
+                    self.path.unlink()         # stale: the copy that wrote it is gone
+                continue
+            except OSError:
+                return True                    # can't write a lock here: run anyway
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(str(os.getpid()))
+            self.held = True
+            return True
+        return False
+
+    def release(self) -> None:
+        if self.held:
+            self.held = False
+            with contextlib.suppress(OSError):
+                self.path.unlink()
+
+
+class _Mutex:
+    """Windows: a named mutex, which Windows drops by itself if she crashes."""
+
+    def __init__(self, handle, k32):
+        self.handle, self.k32 = handle, k32
+
+    def release(self) -> None:
+        if self.handle:
+            self.k32.CloseHandle(self.handle)
+            self.handle = None
+
+
+def single_instance(lock_path: Path):
+    """Something with a release() while this is the only copy running, None if another
+    copy already is. A named mutex on Windows, a pid file everywhere else."""
+    if not sys.platform.startswith("win"):
+        lock = FileLock(lock_path)
+        return lock if lock.acquire() else None
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    k32.CreateMutexW.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p)
+    k32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    name = "Local\\kocicka-" +hashlib.sha1(str(Path(lock_path).resolve()).lower()
+                                             .encode("utf-8")).hexdigest()[:16]
+    handle = k32.CreateMutexW(None, False, name)
+    if not handle:
+        return _Mutex(None, k32)               # no mutex to be had: run anyway
+    if ctypes.get_last_error() == 183:         # ERROR_ALREADY_EXISTS
+        k32.CloseHandle(handle)
+        return None
+    return _Mutex(handle, k32)
+
+
+def czech_count(n: int, key: str) -> str:
+    """1, 2-4 or 5+ of something: Czech picks the word by the number."""
+    one, few, many = STRINGS[key]
+    return "%d %s" % (n, one if n == 1 else few if 1 < n < 5 else many)
+
+
 def czech_days(n: int) -> str:
-    one, few, many = STRINGS["days"]
-    return "%d %s" % (n, one if n == 1 else few if n < 5 else many)
+    return czech_count(n, "days")
+
+
+def snooze_label() -> str:
+    """The menu item, worded from SNOOZE so the two never disagree."""
+    return STRINGS["menu_snooze"] % czech_count(max(1, round(SNOOZE / 60)), "minutes")
 
 
 def greeting(cfg: dict, today: str) -> str:
@@ -1095,7 +1269,7 @@ class Companion:
     this, so all of it can be tested without a display."""
 
     def __init__(self, cfg: dict, store: Store, pet: Pet, today: str,
-                 now: float, scale: float = 1.0):
+                 now: float, scale: float = 1.0, area: tuple | None = None):
         self.cfg, self.store, self.pet = cfg, store, pet
         self.today = today
         self.scale = scale
@@ -1109,7 +1283,9 @@ class Companion:
         self.last_key = None
         self.warned = False
         self.drag_from, self.dragged = None, 0.0
-        self.area = (0, 0, int(pet.screen_w * scale), H)
+        self.area = area or (0, 0, int(pet.screen_w * scale), H)
+        self.saved_work = now
+        self.restore_work(now)
 
     # memory
     def save(self, now: float) -> bool:
@@ -1118,6 +1294,28 @@ class Companion:
             self.warned = True
             self.pet.speak(STRINGS["cant_save"], now, 9)
         return ok
+
+    # work time, kept across a restart the same day
+    def remember_work(self, now: float) -> bool:
+        self.saved_work = now
+        self.cfg["work"] = {"date": self.today, "at": now, "worked": round(self.pet.worked, 1),
+                            "today": round(self.worked_today(), 1)}
+        return self.save(now)
+
+    def restore_work(self, now: float) -> None:
+        """Pick up today's count where the last run left it. Yesterday's starts fresh, and
+        a gap longer than AWAY_AFTER between runs was a break."""
+        w = self.cfg.get("work")
+        if not isinstance(w, dict) or w.get("date") != self.today:
+            return
+        nums = [w.get(k) for k in ("at", "worked", "today")]
+        if not all(isinstance(n, (int, float)) and not isinstance(n, bool) and n >= 0
+                   for n in nums):
+            return
+        at, worked, today = nums
+        self.pet.total += today
+        if 0 <= now - at <= AWAY_AFTER:
+            self.pet.worked = min(float(worked), float(PAUSE_EVERY))
 
     # the day
     def worked_today(self) -> float:
@@ -1204,12 +1402,12 @@ class Companion:
         p = self.pet
         if p.state == "pause":
             p.finish_pause(now)
-        else:
-            p.worked = 0.0
+        p.worked, p.due_at = 0.0, 0.0
         p.speak(STRINGS["skipped"], now, 4)
 
     def snooze(self, now: float) -> None:
-        """Ten more minutes, then the sign comes back."""
+        """SNOOZE more seconds on the clock, then the sign comes back. Never sooner than
+        the hour of work would have brought it."""
         p = self.pet
         if p.state == "pause" and p.kind == "end":
             p.finish_pause(now, lie_down=False)
@@ -1218,10 +1416,11 @@ class Companion:
             self.save(now)
         elif p.state == "pause":
             p.finish_pause(now)
-            p.worked = PAUSE_EVERY - SNOOZE
-        else:
-            p.worked = min(p.worked, PAUSE_EVERY - SNOOZE)
-        p.speak(STRINGS["snoozed"], now, 4)
+            p.due_at = now + SNOOZE
+        elif p.due_at or PAUSE_EVERY - p.worked <= SNOOZE:
+            p.due_at = now + SNOOZE
+        minutes = czech_count(max(1, round(SNOOZE / 60)), "minutes")
+        p.speak(STRINGS["snoozed"] % minutes, now, 4)
 
     # the mouse
     def press(self, x_root: float) -> None:
@@ -1277,6 +1476,8 @@ class Companion:
             self.cfg["ended"] = self.today
             self.save(now)
             self.pet.start_pause(now, "end")
+        if now - self.saved_work >= SAVE_WORK_EVERY:
+            self.remember_work(now)
         return changed
 
     def frame(self, now: float) -> int:
@@ -1393,10 +1594,38 @@ def welcome(root, cfg=None, scale=1.0):
     return result or None
 
 
-def ask_focus(root):
-    """Once a day she asks for the one thing that matters. Empty answer is a fine answer."""
-    from tkinter import simpledialog
-    return simpledialog.askstring(STRINGS["focus_title"], STRINGS["focus_ask"], parent=root)
+def ask_focus(root, answer):
+    """Once a day she asks for the one thing that matters. Empty answer is a fine answer.
+    Returns at once, so she keeps ticking while you think; answer(text) gets what you
+    typed, or None if you closed the window."""
+    import tkinter as tk
+
+    win = tk.Toplevel(root)
+    win.title(STRINGS["focus_title"])
+    win.resizable(False, False)
+    win.configure(bg=PAPER)
+    win.attributes("-topmost", True)
+    tk.Label(win, text=STRINGS["focus_ask"], bg=PAPER, fg=INK, wraplength=320,
+             font=(FONT, 11)).pack(padx=18, pady=(16, 8))
+    entry = tk.Entry(win, font=(FONT, 12), justify="center", width=28)
+    entry.pack(padx=18)
+    entry.focus_set()
+
+    def close(text):
+        if win.winfo_exists():
+            win.destroy()
+            answer(text)
+
+    tk.Button(win, text=STRINGS["focus_ok"], font=(FONT, 10, "bold"), bg="#e8a75c",
+              activebackground="#d99546", relief="flat", padx=14, pady=4,
+              command=lambda: close(entry.get())).pack(pady=(10, 16))
+    win.bind("<Return>", lambda _e: close(entry.get()))
+    win.bind("<Escape>", lambda _e: close(None))
+    win.protocol("WM_DELETE_WINDOW", lambda: close(None))
+    win.update_idletasks()
+    win.geometry("+%d+%d" % ((win.winfo_screenwidth() - win.winfo_width()) // 2,
+                             (win.winfo_screenheight() - win.winfo_height()) // 3))
+    return win
 
 
 def run(argv=()):
@@ -1416,6 +1645,10 @@ def run(argv=()):
 
     root.withdraw()                            # ask before she shows up, not over her
     store = Store()
+    lock = single_instance(store.path.with_name("kocka.lock"))
+    if lock is None:                           # she is already on your screen
+        root.destroy()
+        return
     cfg = store.load()
     if not cfg.get("name"):                    # asked on the very first run, until answered
         cfg.update(welcome(root, cfg, scale) or {})
@@ -1428,13 +1661,8 @@ def run(argv=()):
     pet = Pet((area[2] - area[0]) / scale)
     pet.cart, pet.fur = cfg.get("cart", True), cfg.get("fur", DEFAULT_FUR)
     pet.speak(hello, now, 6)
-    app = Companion(cfg, store, pet, today, now, scale)
-    app.area = area
-    if app.wants_focus(datetime.now().hour):
-        app.asking = True
-        app.set_focus(ask_focus(root), time.time())
-    else:
-        app.save(now)
+    app = Companion(cfg, store, pet, today, now, scale, area)   # picks up today's work
+    app.save(now)
     root.deiconify()
 
     if "--demo" in argv:                       # so you don't have to wait an hour to see it
@@ -1470,12 +1698,12 @@ def run(argv=()):
     menu.add_separator()
     menu.add_command(label=STRINGS["menu_break"], command=act(pet.start_pause))
     menu.add_command(label=STRINGS["menu_skip"], command=act(app.skip))
-    menu.add_command(label=STRINGS["menu_snooze"], command=act(app.snooze))
+    menu.add_command(label=snooze_label(), command=act(app.snooze))
     menu.add_separator()
     menu.add_checkbutton(label=STRINGS["menu_cart"], variable=cart_var,
                          command=lambda: app.set_cart(cart_var.get(), time.time()))
     menu.add_command(label=STRINGS["menu_rename"], command=rename)
-    menu.add_command(label=STRINGS["menu_close"], command=root.destroy)
+    menu.add_command(label=STRINGS["menu_close"], command=root.destroy)   # saved below
     refresh_menu()
 
     def open_menu(e):
@@ -1510,15 +1738,19 @@ def run(argv=()):
                         fullscreen_in_front(), area):
                 (root.withdraw if app.hidden else root.deiconify)()
             if app.wants_focus(hour):          # a new day, or the morning finally came
-                app.asking = True
-                app.set_focus(ask_focus(root), time.time())
-                refresh_menu()
+                app.asking = True              # she keeps ticking while you answer
+                ask_focus(root, lambda text: (app.set_focus(text, time.time()),
+                                              refresh_menu()))
         if app.advance(now, hour):
             render(now)
         root.after(app.tick_ms(), tick)
 
     tick()
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        app.remember_work(time.time())         # so a restart today picks up the count
+        lock.release()
 
 
 # --------------------------------------------------------------------------- self-check

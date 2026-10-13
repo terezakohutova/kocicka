@@ -12,6 +12,8 @@ code = source.rstrip()
 END_HOUR = int(re.search(r"^WORK_END = (\d+)", source, re.M).group(1))
 GOAL = int(re.search(r"^WATER_GOAL = (\d+)", source, re.M).group(1))
 AWAY_MIN = int(re.search(r"^AWAY_AFTER = (\d+)", source, re.M).group(1)) // 60
+SNOOZE_MIN = max(1, round(int(re.search(r"^SNOOZE = (\d+)", source, re.M).group(1)) / 60))
+SNOOZE_TXT = "%d %s" % (SNOOZE_MIN, "minutu" if SNOOZE_MIN == 1 else "minuty" if SNOOZE_MIN < 5 else "minut")
 
 DOC = """# Kočka na plochu
 
@@ -86,7 +88,7 @@ pravý klik ve složce -> Vložit zástupce).
 | **Otočí se k tobě zadkem** | protože je kočka. Co uvidíš, uvidíš |
 | **Povídá** | každých pár minut jeden povzbuzující kočičí hlod |
 | **Dýchá a mrká** | pořád, i když zrovna nic nedělá |
-| **Večer usne** | od 22:00 do 7:00 svěsí hlavu, zavře oči a nad ní stoupá Zzz |
+| **Večer usne** | od 22:00 do 7:00 svěsí hlavu, zavře oči a nad ní stoupá Zzz. Když pracuješ i v noci, počítá ti to dál a pauzu ti dá taky |
 
 **Umí poznat, jestli jsi u počítače**
 
@@ -94,7 +96,9 @@ Když {away} minut nesáhneš na myš ani klávesnici, usne a přestane mluvit. 
 ukazovat ceduli do prázdné místnosti. Až se vrátíš, protáhne se a všimne si tě.
 
 Hodina do pauzy se jí kvůli tomu počítá jenom z **doby, kdy tam opravdu jsi**, ne
-podle hodin na zdi. Hodina na obědě se nepočítá.
+podle hodin na zdi. A když jsi byla pryč, bere to jako pauzu: hodina se počítá znovu
+od nuly. Na Macu to pozná taky, na Linuxu jen s nainstalovaným `xprintidle`.
+Když ji vypneš a zase pustíš, pamatuje si, kolik jsi toho dneska odpracovala.
 
 **Když jde něco přes celou obrazovku, schová se**
 
@@ -110,14 +114,14 @@ Zvětší se na dvojnásobek, zvedne ceduli **STOP / teď pauzička** a spustí 
 („ramena dozadu a dolů", „koukni se z okna na něco daleko", „protáhni krk"...).
 Zároveň se jí nafukuje a splaskává tělo v rytmu **4-7-8** (nádech 4 vteřiny, zadrž 7,
 výdech 8) a na ceduli píše, ve které fázi jsi. Dýchej podle kočky, ne podle textu.
-Když se to zrovna nehodí, pravý klik -> `přeskočit pauzu` nebo `pauzu až za 10 minut`.
+Když se to zrovna nehodí, pravý klik -> `přeskočit pauzu` nebo `pauzu až za {snooze}`.
 
 **V {end}:00 ti řekne, ať toho necháš**
 
 Jednou denně udělá delší verzi téhle cedule: **ŠICHTA KONČÍ / hotovo. zavři to.**
 Pak si lehne. Ukáže ji, jen když jsi ten den u počítače aspoň půl hodiny pracovala,
 takže když ji pustíš až večer, nestraší. Kliknutím ceduli složí, přes pravý klik ji
-odložíš o 10 minut. Kdyby ti to vycházelo blbě, změň nahoře v souboru `WORK_END = {end}`.
+odložíš o {snooze}. Kdyby ti to vycházelo blbě, změň nahoře v souboru `WORK_END = {end}`.
 
 **Hlídá ti pití**
 
@@ -136,7 +140,7 @@ běžet přes noc.
 |---|---|
 | **Levý klik** | dá packu a něco ti řekne; na konci dne složí ceduli |
 | **Tažení myší** | přesuneš ji po šířce obrazovky |
-| **Pravý klik** | celé menu: dnešní věc, pojď sem, dej packu, mlíčko, napila jsem se, řekni něco, dáme pauzu, přeskočit pauzu, pauzu až za 10 minut, vozíček, přejmenovat / barva, zavřít |
+| **Pravý klik** | celé menu: dnešní věc, pojď sem, dej packu, mlíčko, napila jsem se, řekni něco, dáme pauzu, přeskočit pauzu, pauzu až za {snooze}, vozíček, přejmenovat / barva, zavřít |
 
 ---
 
@@ -165,8 +169,8 @@ takže by neměla. Na Macu a Linuxu otevři `kocicka.py` a nahoře změň čísl
 normální okno (ne přes celou obrazovku) a do vteřiny je zpátky.
 
 **Je kolem ní světlý obdélník.** Průhlednost pozadí umí jenom Windows. Na Macu nebo
-Linuxu bude mít kolem sebe krémový čtverec, jinak funguje stejně (jen nepozná, že jsi
-od stolu a neschová se při sdílení obrazovky).
+Linuxu bude mít kolem sebe krémový čtverec, jinak funguje stejně (jen se neschová
+za aplikací přes celou obrazovku).
 
 **Dvojklik na `kocicka.bat` jenom blikne a nic se nestane.** Nejspíš není Python v PATH.
 Přeinstaluj ho a zaškrtni „Add python.exe to PATH".
@@ -189,6 +193,7 @@ Ulož jako `kocicka.py`:
 """
 
 out = HERE / "KOCICKA.md"
-out.write_text(DOC.format(code=code, end=END_HOUR, goal=GOAL, away=AWAY_MIN), encoding="utf-8")
+out.write_text(DOC.format(code=code, end=END_HOUR, goal=GOAL, away=AWAY_MIN, snooze=SNOOZE_TXT),
+               encoding="utf-8")
 print("KOCICKA.md: konec smeny %d:00, cil %d sklenic, odchod po %d min" %
       (END_HOUR, GOAL, AWAY_MIN))

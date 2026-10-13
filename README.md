@@ -21,8 +21,14 @@ no account, no telemetry, nothing leaves your machine.
 Most desktop pets are decoration. This one actually looks after you:
 
 - **She counts an hour of real work, not an hour on the clock.** If you walk
-  away from the desk, she stops counting and goes to sleep. Your lunch break
-  does not earn you a break, and neither does a laptop that was asleep.
+  away from the desk for five minutes or more, she stops counting and naps,
+  and when you come back that time away counts as your break, so the hour
+  starts again. A laptop that was asleep does not count as work either. She
+  knows you left on Windows, on macOS, and on Linux under X11 with
+  `xprintidle` installed. Anywhere else (Wayland, or no `xprintidle`) she
+  cannot tell, so there it is an hour on the clock while she runs.
+- **She remembers today's count.** Restart her (or the computer) and she
+  picks up the day's work time where she left off; the next day starts fresh.
 - **She gets out of the way of fullscreen apps.** When the window in front
   fills its whole monitor without a title bar (a slideshow, a fullscreen call
   or video, a game), she hides until it stops being fullscreen. That is all
@@ -33,7 +39,11 @@ Most desktop pets are decoration. This one actually looks after you:
 - **Her breaks are guided.** Every hour she grows, holds up a STOP sign and
   counts down 30 seconds, walking you through a different stretch every few
   seconds while her body breathes in a 4-7-8 rhythm you can follow. If the
-  timing is bad, right click to skip that one or push it back 10 minutes.
+  timing is bad, right click to skip that one or push it back 10 minutes
+  (on the clock, whatever you do in between).
+- **Night owls get breaks too.** From 22:00 to 07:00 she dozes and keeps
+  quiet, but your work still counts and the hourly break still comes. The
+  end-of-day sign never shows at night.
 - **She asks what the one thing is today**, keeps it in her menu, and lets
   you tick it off.
 - **She tracks your water** and gets pointed about it in the afternoon.
@@ -106,7 +116,7 @@ Windows-only and degrade quietly elsewhere:
 | | Windows | macOS / Linux |
 |---|---|---|
 | Transparent background | yes | no, she sits on a small cream card |
-| Knowing you left the desk | yes | assumes you are always there |
+| Knowing you left the desk | yes | macOS: yes (`ioreg`). Linux: only under X11 with `xprintidle` installed; otherwise she assumes you are always there |
 | Hiding behind fullscreen apps | yes | no |
 | Standing on the taskbar, wherever it is | yes, from the work area | assumes a bar 40 px tall at the bottom |
 | Sharp on high-DPI displays | yes, she scales with the display | depends on Tk |
@@ -121,12 +131,19 @@ welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Privacy
 
-There is no networking code in `kocicka.py` at all: no `socket`, `urllib`,
-`http` or `subprocess`, which you can check with a quick search. What she does
-touch:
+There is no networking code in `kocicka.py` at all: no `socket`, `urllib` or
+`http`, which you can check with a quick search. What she does touch:
 
 - **`kocka.json`** in your config folder (see above): her name and colour,
-  the day you met, today's one thing, and today's water count.
+  the day you met, today's one thing, today's water count, and how long you
+  have worked today (so a restart keeps it).
+- **`kocka.lock`** next to it, outside Windows: the process id of the copy
+  that is running, so a second copy does not start. On Windows a named mutex
+  does the same job and no file is written.
+- **On macOS and Linux, one small local program** every few seconds, to ask
+  how long since the last key press or mouse move: `ioreg -c IOHIDSystem` on
+  macOS (she reads only `HIDIdleTime` from it), `xprintidle` on Linux if it
+  is installed. That is the only `subprocess` in the file.
 - **On Windows, a few questions to the OS**, once a second: how long since
   the last key press or mouse move (`GetLastInputInfo`, a single timestamp,
   never which keys); whether the window in front fills its monitor
@@ -145,10 +162,10 @@ The constants at the top of `kocicka.py` are meant to be edited:
 | `PAUSE_EVERY = 3600` | seconds of real work between breaks |
 | `PAUSE_SECS = 30` | how long a break lasts |
 | `WATER_GOAL = 6` | glasses before she stops nagging |
-| `AWAY_AFTER = 300` | seconds of no input before she assumes you left |
-| `SNOOZE = 600` | how far "break in 10 minutes" pushes it |
+| `AWAY_AFTER = 300` | seconds of no input before she assumes you left; time away counts as your break |
+| `SNOOZE = 600` | how far "break in 10 minutes" pushes it, on the clock; the menu wording follows it |
 | `END_AFTER_WORK = 1800` | work today before the end-of-day sign can show |
-| `NIGHT = (22, 7)` | when she sleeps |
+| `NIGHT = (22, 7)` | when she dozes: no pep talks or end-of-day sign, but work still counts and breaks still come |
 | `TASKBAR = 40` | macOS and Linux only: raise this if she overlaps your dock or panel |
 
 ## Language
