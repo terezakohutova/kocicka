@@ -153,8 +153,9 @@ a nahoře změň číslo u `TASKBAR = 60`. Větší číslo = výš nad panelem.
 **Zmizela a nevrací se.** Nejspíš si myslí, že sdílíš obrazovku. Přepni na normální
 okno (ne přes celou obrazovku) a do vteřiny je zpátky.
 
-**Je kolem ní růžový obdélník.** Průhlednost pozadí umí jenom Windows. Na Macu nebo
-Linuxu bude mít kolem sebe čtverec, jinak funguje stejně (jen nepozná, že jsi od stolu).
+**Je kolem ní světlý obdélník.** Průhlednost pozadí umí jenom Windows. Na Macu nebo
+Linuxu bude mít kolem sebe krémový čtverec, jinak funguje stejně (jen nepozná, že jsi
+od stolu a neschová se při sdílení obrazovky).
 
 **Dvojklik na `kocicka.bat` jenom blikne a nic se nestane.** Nejspíš není Python v PATH.
 Přeinstaluj ho a zaškrtni „Add python.exe to PATH".

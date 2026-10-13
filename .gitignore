@@ -3,7 +3,3 @@
 kocka.json
 
 __pycache__/
-
-# verification leftovers
-_check.png
-_blind/

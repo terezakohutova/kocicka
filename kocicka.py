@@ -10,6 +10,8 @@ it a day when the day is done.
   demo:       python kocicka.py --demo        (speeds the timers up so you see it now)
   self-check: python kocicka.py --selftest
 """
+from __future__ import annotations
+
 import ctypes
 import json
 import math
@@ -21,7 +23,7 @@ from pathlib import Path
 
 W, H = 200, 230      # window size: cat in the bottom, speech bubble on top
 GROUND = 210         # floor line inside the window
-TASKBAR = 60         # ponytail: fixed taskbar margin, bump it if she overlaps your taskbar
+TASKBAR = 60         # fixed taskbar margin, bump it if she overlaps your taskbar
 SPEED = 1.6          # px per frame while rolling
 TICK = 40            # ms per frame
 SLOW = 25            # how many frames between the expensive Windows checks
@@ -186,14 +188,31 @@ _LII = _LASTINPUTINFO()
 _LII.cbSize = ctypes.sizeof(_LII)
 
 
-def _win32():
+def _load_win32():
     try:
-        return ctypes.windll.user32, ctypes.windll.kernel32
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
     except AttributeError:
         return None, None                      # not Windows
+    # declared up front, so 64-bit window handles are never squeezed through a C int
+    hwnd = ctypes.c_void_p
+    for name in ("GetForegroundWindow", "GetShellWindow", "GetDesktopWindow"):
+        getattr(user32, name).restype = hwnd
+    user32.GetWindowLongW.argtypes = (hwnd, ctypes.c_int)
+    user32.GetWindowLongW.restype = ctypes.c_long
+    user32.GetWindowRect.argtypes = (hwnd, ctypes.POINTER(_RECT))
+    kernel32.GetTickCount.restype = ctypes.c_uint32
+    return user32, kernel32
 
 
-def idle_seconds():
+_USER32, _KERNEL32 = _load_win32()
+
+
+def _win32():
+    """user32 and kernel32 on Windows, (None, None) everywhere else."""
+    return _USER32, _KERNEL32
+
+
+def idle_seconds() -> float:
     """Seconds since you last touched the keyboard or mouse. 0 where we can't tell."""
     user32, kernel32 = _win32()
     if not user32 or not user32.GetLastInputInfo(ctypes.byref(_LII)):
@@ -202,7 +221,7 @@ def idle_seconds():
     return ((kernel32.GetTickCount() - _LII.dwTime) % (2 ** 32)) / 1000.0
 
 
-def sharing_screen():
+def sharing_screen() -> bool:
     """True when the front window covers the whole screen: a call, a slideshow, a video."""
     user32, _ = _win32()
     if not user32:
@@ -224,7 +243,7 @@ def sharing_screen():
 class Pet:
     """Position + behaviour. No tkinter in here, so it can be tested headless."""
 
-    def __init__(self, screen_w, x=None):
+    def __init__(self, screen_w: int, x: float | None = None):
         self.screen_w = screen_w
         self.x = screen_w // 2 if x is None else x
         self.dir = 1
@@ -247,21 +266,21 @@ class Pet:
         self.roll = 0.0      # distance rolled, drives the spoke rotation
 
     @property
-    def max_x(self):
+    def max_x(self) -> int:
         return max(0, self.screen_w - W)
 
-    def asleep(self, hour):
+    def asleep(self, hour: int) -> bool:
         return hour >= NIGHT[0] or hour < NIGHT[1]
 
-    def speak(self, text, now, secs=4):
+    def speak(self, text: str, now: float, secs: float = 4) -> None:
         self.say, self.say_until = text, now + secs
 
-    def do(self, state, now, secs=None):
+    def do(self, state: str, now: float, secs: float | None = None) -> None:
         self.state = state
         self.started = now
         self.until = now + (secs if secs else random.uniform(*DURATION.get(state, (2.5, 6))))
 
-    def start_pause(self, now, kind="break"):
+    def start_pause(self, now: float, kind: str = "break") -> None:
         span = PAUSE_SECS if kind == "break" else END_SECS
         prompts = PAUSE_COACH if kind == "break" else END_COACH
         self.state, self.dir, self.say, self.kind = "pause", 1, "", kind
@@ -269,17 +288,17 @@ class Pet:
         self.worked = 0.0
         self.coach = random.sample(prompts, k=min(len(prompts), max(1, span // COACH_EVERY)))
 
-    def pause_left(self, now):
+    def pause_left(self, now: float) -> int:
         return max(0, math.ceil(self.pause_until - now))
 
-    def coach_line(self, now):
+    def coach_line(self, now: float) -> str:
         """The stretch she's asking for right now; a new one every COACH_EVERY seconds."""
         if not self.coach:
             return ""
         done = self.pause_span - max(0.0, self.pause_until - now)
         return self.coach[min(len(self.coach) - 1, int(done // COACH_EVERY))]
 
-    def zoom(self, now):
+    def zoom(self, now: float) -> float:
         """1.0 normally; eases up to PAUSE_ZOOM for a break and back down at the end."""
         if self.state != "pause":
             return 1.0
@@ -287,7 +306,7 @@ class Pet:
         eased = min(1.0, (self.pause_span - left) / 0.5, left / 0.5)
         return 1.0 + (PAUSE_ZOOM - 1.0) * eased
 
-    def _breathe(self, now):
+    def _breathe(self, now: float) -> None:
         """4-7-8: her whole body does it so you can follow the cat instead of the text."""
         cycle = (now - (self.pause_until - self.pause_span)) % 19.0
         if cycle < 4:
@@ -297,7 +316,7 @@ class Pet:
         else:
             self.breath, self.breath_word = 1.0 - (cycle - 11) / 8.0, "výdech"
 
-    def step(self, now, hour, away=False):
+    def step(self, now: float, hour: int, away: bool = False) -> str:
         dt = min(2.0, max(0.0, now - self.last_step)) if self.last_step else 0.0
         self.last_step = now
         if self.say and now > self.say_until:
@@ -517,11 +536,9 @@ def draw(c, pet, frame):
                     continue
                 if sit:
                     continue                                    # folded under when sitting
-            if i == 3 and st == "lick":
-                continue                                        # drawn last, over her head
+            if i == 3 and st in ("lick", "highfive", "pause"):
+                continue                                        # raised paw, drawn over the body
             tipx, tipy = lx + (sw * ph if st == "walk" else 0), GROUND
-            if i == 3 and st in ("highfive", "pause"):
-                tipx, tipy = lx + 18, by - 20                   # paw up
             line([(lx, by + 14), (tipx, tipy)], width=10, fill=DARK, capstyle="round")
 
     # body + stripes
@@ -535,6 +552,12 @@ def draw(c, pet, frame):
              width=5, fill=FRAME, capstyle="round", joinstyle="round")
         if in_cart:
             line([(104, by - 27), (104, by + 21)], width=5, fill=STRAP)
+
+    # the paw she holds out to you (high five, and while the sign is up), in front of her chest
+    if st in ("highfive", "pause"):
+        line([(124, by + 12), (166, by - 2)], width=10, fill=DARK, capstyle="round")
+        oval(158, by - 11, 178, by + 7, fill=DARK, outline="")
+        oval(165, by - 6, 172, by + 1, fill=PINK, outline="")              # toe bean
 
     # ears, head
     poly([(hx - 21, hy - 12), (hx - 25, hy - 36), (hx - 5, hy - 22)], fill=FUR, outline="")
@@ -614,12 +637,12 @@ def draw_sign(c, cw, k, pet, now):
 
 # --------------------------------------------------------------------------- her memory
 
-def set_fur(palette):
+def set_fur(palette: str) -> None:
     global FUR, DARK, PINK
     FUR, DARK, PINK = PALETTES.get(palette, PALETTES["zrzava"])
 
 
-def load_config(path=CONFIG):
+def load_config(path: Path = CONFIG) -> dict:
     try:
         cfg = json.loads(path.read_text(encoding="utf-8"))
         return cfg if isinstance(cfg, dict) else {}
@@ -627,34 +650,40 @@ def load_config(path=CONFIG):
         return {}                              # missing or corrupt: she just asks again
 
 
-def save_config(cfg, path=CONFIG):
+def save_config(cfg: dict, path: Path = CONFIG) -> None:
     try:
         path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass                                   # read-only folder: she forgets, but still runs
 
 
-def czech_days(n):
+def czech_days(n: int) -> str:
     return "%d %s" % (n, "den" if n == 1 else "dny" if n < 5 else "dní")
 
 
-def greeting(cfg, today):
+def greeting(cfg: dict, today: str) -> str:
     """Day one she introduces herself; after that she picks up where she left off."""
     name = cfg.get("name") or FALLBACK_NAME
     first, last = cfg.get("first_seen"), cfg.get("last_seen")
     if not first or first == today:
         return "ahoj, jsem %s" % name
-    days = (date.fromisoformat(today) - date.fromisoformat(first)).days + 1
-    gap = (date.fromisoformat(today) - date.fromisoformat(last)).days if last else 0
+    try:
+        days = (date.fromisoformat(today) - date.fromisoformat(first)).days + 1
+        gap = (date.fromisoformat(today) - date.fromisoformat(last)).days if last else 0
+    except (TypeError, ValueError):
+        return "ahoj, jsem %s" % name          # dates she can't read: just say hello
     if gap >= 2:
         return "chyběla jsi mi! %s jsme se neviděly" % czech_days(gap)
     return "zase já. jsme spolu %d. den" % days
 
 
-def water_line(cfg, today, hour):
+def water_line(cfg: dict, today: str, hour: int) -> str | None:
     """Her afternoon nag about drinking, or nothing if it isn't warranted."""
-    w = cfg.get("water") or {}
+    w = cfg.get("water")
+    w = w if isinstance(w, dict) else {}
     drunk = w.get("count", 0) if w.get("date") == today else 0
+    if not isinstance(drunk, int):
+        drunk = 0
     if hour < 14 or drunk >= WATER_GOAL:
         return None
     if drunk == 0:
@@ -750,9 +779,10 @@ def run():
     root.attributes("-topmost", True)
     try:
         root.attributes("-transparentcolor", KEY)
+        backdrop = KEY
     except tk.TclError:
-        pass                                   # non-Windows: she gets a solid backdrop
-    root.configure(bg=KEY)
+        backdrop = PAPER                       # no colour keying here: a soft card, not hot pink
+    root.configure(bg=backdrop)
 
     root.withdraw()                            # ask before she shows up, not over her
     cfg = load_config()
@@ -776,7 +806,7 @@ def run():
     pet.speak(hello, time.time(), 6)
     if "--demo" in sys.argv:                   # so you don't have to wait an hour to see it
         pet.next_line, pet.worked = time.time() + 3, PAUSE_EVERY - 12
-    c = tk.Canvas(root, width=W, height=H, bg=KEY, highlightthickness=0)
+    c = tk.Canvas(root, width=W, height=H, bg=backdrop, highlightthickness=0)
     c.pack()
     ui = {"frame": 0, "drag": None, "moved": 0, "away": False, "hidden": False}
 
@@ -797,10 +827,10 @@ def run():
         pet.speak("jsem na tebe pyšná" if f["done"] else "tak jo, jedem dál", time.time(), 5)
 
     def drank():
-        w = cfg.get("water") or {}
-        if w.get("date") != day["date"]:
+        w = cfg.get("water")
+        if not isinstance(w, dict) or w.get("date") != day["date"]:
             w = {"date": day["date"], "count": 0}
-        w["count"] += 1
+        w["count"] = (w.get("count") if isinstance(w.get("count"), int) else 0) + 1
         cfg["water"] = w
         save_config(cfg)
         left = WATER_GOAL - w["count"]
@@ -866,7 +896,12 @@ def run():
     c.bind("<ButtonPress-1>", press)
     c.bind("<B1-Motion>", motion)
     c.bind("<ButtonRelease-1>", release)
-    c.bind("<Button-3>", lambda e: menu.tk_popup(e.x_root, e.y_root))
+    def open_menu(e):
+        menu.tk_popup(e.x_root, e.y_root)
+
+    c.bind("<Button-3>", open_menu)
+    if root.tk.call("tk", "windowingsystem") == "aqua":
+        c.bind("<Button-2>", open_menu)        # macOS Tk reports the right button as 2
 
     def slow_checks(now, hour):
         """The expensive Windows questions, asked once a second instead of 25 times."""
@@ -923,7 +958,7 @@ def run():
 
 # --------------------------------------------------------------------------- self-check
 
-def selftest():
+def selftest() -> None:
     now = time.time()
     p = Pet(1920, x=0)
     assert p.cart, "she comes in her cart by default"
@@ -1057,13 +1092,15 @@ def selftest():
     # her memory: same name and colour after a restart
     assert all(len(v) == 3 for v in PALETTES.values()), "fur, shading, nose"
     assert {k for k, _ in PALETTE_LABELS} == set(PALETTES), "every palette is offered"
-    tmp = CONFIG.with_name("_selftest.json")
-    save_config({"name": "Micka", "fur": "seda", "cart": True}, tmp)
-    assert load_config(tmp) == {"name": "Micka", "fur": "seda", "cart": True}
-    tmp.write_text("{ rozbite", encoding="utf-8")
-    assert load_config(tmp) == {}, "a corrupt config must not stop her"
-    tmp.unlink()
-    assert load_config(tmp) == {}, "a missing config must not stop her"
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        tmp = Path(folder) / "kocka.json"
+        save_config({"name": "Micka", "fur": "seda", "cart": True}, tmp)
+        assert load_config(tmp) == {"name": "Micka", "fur": "seda", "cart": True}
+        tmp.write_text("{ rozbite", encoding="utf-8")
+        assert load_config(tmp) == {}, "a corrupt config must not stop her"
+        tmp.unlink()
+        assert load_config(tmp) == {}, "a missing config must not stop her"
     set_fur("seda")
     assert FUR == PALETTES["seda"][0]
     set_fur("neexistuje")

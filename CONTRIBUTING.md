@@ -23,11 +23,15 @@ and commit both files together.
 
 ```
 python kocicka.py --selftest
+python -m unittest discover -s tests
 ```
 
-If it prints `ok`, the logic is fine. Add an assert for whatever you changed -
-there is no test framework and there does not need to be one, the whole suite
-is a single function at the bottom of the file.
+`--selftest` is her built-in check, a single function at the bottom of the
+file, so even someone with only `KOCICKA.md` can run it. `tests/` covers the
+rest: how work time is counted, when breaks start and end, a hand-edited
+`kocka.json`, and a smoke test that every pose draws. Both are plain standard
+library, no pytest needed. Add a test for whatever you changed. CI runs all of
+it on Windows, macOS and Linux, and fails if `KOCICKA.md` is out of date.
 
 **If you changed anything she draws**, also run:
 
@@ -62,8 +66,8 @@ caught three real bugs that the self-test happily passed.
 - **More poses.** They are self-contained: add a state to `TRICKS`, give it
   a duration in `DURATION`, draw it in `draw()`, and check it on the pose
   sheet.
-- **A recording.** The README badly needs an animated GIF of her rolling
-  around and holding up the break sign.
+- **A recording.** The README has stills of every pose and of the break sign,
+  but an animated GIF of her rolling around would show her off better.
 
 ## What she should not become
 
