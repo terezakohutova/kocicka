@@ -59,8 +59,11 @@ Ověříš to tak, že v Příkazovém řádku napíšeš `python --version` a v
    Pak se tě ještě jednou denně zeptá, co je dneska ta jedna věc, kterou chceš stihnout.
    (Můžeš to nechat prázdné, nevadí.)
 
-Vedle se vytvoří soubor `kocka.json`, kde si pamatuje jméno, barvu, kolik jste spolu dní
-a kolikrát ses dneska napila. Nikam se neposílá.
+Do složky `%APPDATA%\\kocicka` si uloží soubor `kocka.json`, kde si pamatuje jméno,
+barvu, kolik jste spolu dní a kolikrát ses dneska napila. Nikam se neposílá. (Starší
+verze ho měly vedle `kocicka.py`; při prvním spuštění si ho přenese sama a ten starý
+můžeš smazat. Na Macu je v `~/Library/Application Support/kocicka`, na Linuxu
+v `~/.config/kocicka`.)
 
 Aby ti naskakovala sama po zapnutí počítače: stiskni **Win+R**, napiš `shell:startup`,
 Enter, a do té složky hoď zástupce na `kocicka.bat` (pravý klik -> Kopírovat, pak
@@ -93,10 +96,12 @@ ukazovat ceduli do prázdné místnosti. Až se vrátíš, protáhne se a všimn
 Hodina do pauzy se jí kvůli tomu počítá jenom z **doby, kdy tam opravdu jsi**, ne
 podle hodin na zdi. Hodina na obědě se nepočítá.
 
-**Když sdílíš obrazovku, schová se**
+**Když jde něco přes celou obrazovku, schová se**
 
-Jakmile jde nějaká aplikace přes celou obrazovku (prezentace, hovor, video), zmizí.
-Když ji zavřeš, vrátí se. Takže tě neztrapní na meetingu.
+Jakmile je vepředu okno přes celý monitor a bez titulku (prezentace, hovor nebo video
+na celou obrazovku), zmizí. Když to skončí, vrátí se. Jestli sdílíš obrazovku, poznat
+neumí: když sdílíš obyčejné okno nebo celou plochu, zůstane vidět. Čas schovaná ti
+počítá dál jako práci, a když mezitím přijde čas na pauzu, počká, až zase vyleze.
 
 **Jednou za hodinu práce: pauza**
 
@@ -105,11 +110,14 @@ Zvětší se na dvojnásobek, zvedne ceduli **STOP / teď pauzička** a spustí 
 („ramena dozadu a dolů", „koukni se z okna na něco daleko", „protáhni krk"...).
 Zároveň se jí nafukuje a splaskává tělo v rytmu **4-7-8** (nádech 4 vteřiny, zadrž 7,
 výdech 8) a na ceduli píše, ve které fázi jsi. Dýchej podle kočky, ne podle textu.
+Když se to zrovna nehodí, pravý klik -> `přeskočit pauzu` nebo `pauzu až za 10 minut`.
 
 **V {end}:00 ti řekne, ať toho necháš**
 
 Jednou denně udělá delší verzi téhle cedule: **ŠICHTA KONČÍ / hotovo. zavři to.**
-Pak si lehne. Kdyby ti to vycházelo blbě, změň nahoře v souboru `WORK_END = {end}`.
+Pak si lehne. Ukáže ji, jen když jsi ten den u počítače aspoň půl hodiny pracovala,
+takže když ji pustíš až večer, nestraší. Kliknutím ceduli složí, přes pravý klik ji
+odložíš o 10 minut. Kdyby ti to vycházelo blbě, změň nahoře v souboru `WORK_END = {end}`.
 
 **Hlídá ti pití**
 
@@ -119,24 +127,26 @@ totéž. Odpoledne ti řekne, jak na tom jste. Cíl je {goal} skleniček, pak p�
 **Jedna věc na dnešek**
 
 Ráno se zeptá, co je dneska ta jedna věc. Máš ji pak nahoře v menu. Když ji máš
-hotovou, klikni na ni a je z toho `hotovo:`. Zítra se zeptá znovu.
+hotovou, klikni na ni a je z toho `hotovo:`. Zítra se zeptá znovu, i když ji necháš
+běžet přes noc.
 
 **Když na ni sáhneš**
 
 | Akce | Co udělá |
 |---|---|
-| **Levý klik** | dá packu a něco ti řekne |
+| **Levý klik** | dá packu a něco ti řekne; na konci dne složí ceduli |
 | **Tažení myší** | přesuneš ji po šířce obrazovky |
-| **Pravý klik** | celé menu: dnešní věc, pojď sem, dej packu, mlíčko, napila jsem se, řekni něco, dáme pauzu, vozíček, přejmenovat / barva, zavřít |
+| **Pravý klik** | celé menu: dnešní věc, pojď sem, dej packu, mlíčko, napila jsem se, řekni něco, dáme pauzu, přeskočit pauzu, pauzu až za 10 minut, vozíček, přejmenovat / barva, zavřít |
 
 ---
 
 ## Když si to chceš rozmyslet
 
 **Jiné jméno nebo barva** -> pravý klik -> `přejmenovat / barva`. Otevře se stejné okénko
-jako na začátku.
+jako na začátku. Když ho zavřeš křížkem, nic se nezmění.
 
-**Úplně od nuly** -> smaž vedle ležící `kocka.json` a pusť ji znova. Zeptá se jako poprvé.
+**Úplně od nuly** -> smaž složku `%APPDATA%\\kocicka` (napiš to do adresního řádku
+Průzkumníka) a pusť ji znova. Zeptá se jako poprvé.
 
 **Chodí po čtyřech místo vozíčku** -> pravý klik -> odškrtni `vozíček`.
 
@@ -147,11 +157,12 @@ Nebo pusť `python kocicka.py --demo`, to zrychlí časovače.
 
 ## Kdyby něco nefungovalo
 
-**Sedí na hlavním panelu nebo plave nad ním.** Otevři `kocicka.py` v Poznámkovém bloku
-a nahoře změň číslo u `TASKBAR = 60`. Větší číslo = výš nad panelem.
+**Sedí na hlavním panelu nebo plave nad ním.** Na Windows se řídí tím, kde je panel,
+takže by neměla. Na Macu a Linuxu otevři `kocicka.py` a nahoře změň číslo u
+`TASKBAR = 40`. Větší číslo = výš.
 
-**Zmizela a nevrací se.** Nejspíš si myslí, že sdílíš obrazovku. Přepni na normální
-okno (ne přes celou obrazovku) a do vteřiny je zpátky.
+**Zmizela a nevrací se.** Nejspíš je vepředu něco přes celou obrazovku. Přepni na
+normální okno (ne přes celou obrazovku) a do vteřiny je zpátky.
 
 **Je kolem ní světlý obdélník.** Průhlednost pozadí umí jenom Windows. Na Macu nebo
 Linuxu bude mít kolem sebe krémový čtverec, jinak funguje stejně (jen nepozná, že jsi
@@ -162,6 +173,9 @@ Přeinstaluj ho a zaškrtni „Add python.exe to PATH".
 
 **Chci ověřit, že je soubor v pořádku.** V Příkazovém řádku ve složce spusť
 `python kocicka.py --selftest`. Když vypíše `ok`, je všechno jak má být.
+
+**Nepamatuje si jméno.** Když jí nejde zapisovat do složky, jednou ti to řekne
+v bublině. Zkontroluj, že máš do `%APPDATA%` právo zapisovat.
 
 ---
 

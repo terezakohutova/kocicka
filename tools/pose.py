@@ -37,7 +37,7 @@ def pose_sheet(root):
 
 
 def break_sign(root):
-    """Exactly what tick() draws during a break, 9 seconds in (second stretch, holding)."""
+    """Exactly what render() draws during a break, 9 seconds in (second stretch, holding)."""
     pet = K.Pet(1000)
     pet.start_pause(0.0)
     now = 9.0
@@ -46,8 +46,7 @@ def break_sign(root):
     cw, ch = int(K.W * k), int((K.H + K.PAUSE_EXTRA) * k)
     c = tk.Canvas(root, width=cw, height=ch, bg="white", highlightthickness=0)
     c.pack()
-    K.draw(c, pet, 30)
-    K.zoom_canvas(c, k)
+    K.draw(c, pet, 30, k)
     c.move("all", 0, K.PAUSE_EXTRA * k)
     K.draw_sign(c, cw, k, pet, now)
 

@@ -1,5 +1,8 @@
 # Her memory on this machine: name, colour, days together, today's focus note,
-# water count. Personal and changes daily, so it stays out of git.
+# water count. It now lives in the per-user config folder; older versions kept it
+# here, next to the script, so it stays ignored.
 kocka.json
+kocka.json.bak
 
 __pycache__/
+.ruff_cache/

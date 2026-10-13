@@ -22,16 +22,23 @@ and commit both files together.
 ## Before you open a PR
 
 ```
-python kocicka.py --selftest
 python -m unittest discover -s tests
+ruff check .
 ```
 
-`--selftest` is her built-in check, a single function at the bottom of the
-file, so even someone with only `KOCICKA.md` can run it. `tests/` covers the
-rest: how work time is counted, when breaks start and end, a hand-edited
-`kocka.json`, and a smoke test that every pose draws. Both are plain standard
-library, no pytest needed. Add a test for whatever you changed. CI runs all of
-it on Windows, macOS and Linux, and fails if `KOCICKA.md` is out of date.
+`tests/` is where the checking lives: how work time is counted, when breaks
+start, wait, get skipped or snoozed, what a click does and where, the day
+rolling over at midnight, her memory on disk, where she stands on screen, the
+Windows calls (against a fake `user32`), and that every pose draws the parts
+it should. Most of the app logic sits in the `Companion` class, which has no
+tkinter in it, so it is tested without a display. The tests are plain
+standard library, no pytest needed. Add a test for whatever you changed.
+
+`python kocicka.py --selftest` runs a tiny smoke check that needs only the
+one file (so someone with just `KOCICKA.md` can run it), then the `tests/`
+suite if it sits next to her. `ruff` is the one non-stdlib tool, and only for
+linting; CI pins its version. CI runs everything on Windows, macOS and Linux,
+and fails if `KOCICKA.md` is out of date.
 
 **If you changed anything she draws**, also run:
 
@@ -53,16 +60,19 @@ caught three real bugs that the self-test happily passed.
 - Keep it boring and readable. She is a toy that people should be able to
   open in Notepad and understand.
 - Anything platform-specific must degrade quietly, not crash. See
-  `idle_seconds()` and `sharing_screen()` for the pattern - they return a
-  safe default when the Windows APIs are not there.
+  `idle_seconds()`, `fullscreen_in_front()` and `work_area()` for the
+  pattern - they return a safe default when the Windows APIs are not there.
+- Every word she shows goes in `STRINGS`. A test fails if Czech turns up
+  anywhere else in the file.
 
 ## Good first contributions
 
-- **Translations.** Everything she says is in `LINES`, `MEOWS`,
-  `HAIRBALL_SAYS`, `BUTT_SAYS`, `BACK_SAYS`, `PAUSE_COACH` and `END_COACH`,
-  all in Czech right now. English would roughly double who can use her.
-- **macOS and Linux.** Transparent backgrounds, idle detection and
-  fullscreen detection are Windows-only today.
+- **Translations.** Everything she shows is in the `STRINGS` table, all in
+  Czech right now and addressed to a woman. An English table in her voice
+  (not a word-for-word translation) would roughly double who can use her;
+  it also needs a small way to pick the language, which does not exist yet.
+- **macOS and Linux.** Transparent backgrounds, idle detection, fullscreen
+  detection and the taskbar position are Windows-only today.
 - **More poses.** They are self-contained: add a state to `TRICKS`, give it
   a duration in `DURATION`, draw it in `draw()`, and check it on the pose
   sheet.

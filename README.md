@@ -23,15 +23,23 @@ Most desktop pets are decoration. This one actually looks after you:
 - **She counts an hour of real work, not an hour on the clock.** If you walk
   away from the desk, she stops counting and goes to sleep. Your lunch break
   does not earn you a break, and neither does a laptop that was asleep.
-- **She hides while you share your screen.** When an app goes fullscreen -
-  a call, a slideshow, a video - she disappears until you come back.
+- **She gets out of the way of fullscreen apps.** When the window in front
+  fills its whole monitor without a title bar (a slideshow, a fullscreen call
+  or video, a game), she hides until it stops being fullscreen. That is all
+  she can see: she cannot tell whether you are sharing your screen, so if you
+  share an ordinary window or your whole desktop, she stays put. Your work
+  time keeps counting while she is hidden, and a break that comes due waits
+  until she is back.
 - **Her breaks are guided.** Every hour she grows, holds up a STOP sign and
   counts down 30 seconds, walking you through a different stretch every few
-  seconds while her body breathes in a 4-7-8 rhythm you can follow.
+  seconds while her body breathes in a 4-7-8 rhythm you can follow. If the
+  timing is bad, right click to skip that one or push it back 10 minutes.
 - **She asks what the one thing is today**, keeps it in her menu, and lets
   you tick it off.
 - **She tracks your water** and gets pointed about it in the afternoon.
-- **She tells you to stop working** once a day and then lies down.
+- **She tells you to stop working** once a day, after 16:00 and only once
+  you have put in half an hour of work that day, then lies down. A click puts
+  the sign down; right click pushes it back 10 minutes.
 
 And in between all that she rolls around, grooms a paw, meows, drinks milk,
 eats grass, coughs up a hairball, climbs out of her cart for a nap, and
@@ -60,7 +68,20 @@ python kocicka.py
 ```
 
 On the first run she asks for a colour and a name, then remembers both in
-`kocka.json` next to the script and comes back the same cat every time.
+`kocka.json` in your per-user config folder and comes back the same cat every
+time:
+
+| | |
+|---|---|
+| Windows | `%APPDATA%\kocicka\kocka.json` |
+| macOS | `~/Library/Application Support/kocicka/kocka.json` |
+| Linux | `$XDG_CONFIG_HOME/kocicka/kocka.json` (usually `~/.config/kocicka/`) |
+
+Older versions kept it next to the script; she copies it over on the first
+start and leaves the old file alone, so you can delete it. Every save goes to
+a temporary file first and then replaces the real one, and the previous
+version is kept as `kocka.json.bak`. If the folder cannot be written, she
+says so once in her speech bubble and carries on without remembering.
 
 On Windows, double-click `kocicka.bat`; it starts her with `pythonw`, so no
 console window stays open. To have her start with the machine, put a shortcut
@@ -73,9 +94,9 @@ python3-tk` on Debian and Ubuntu).
 
 | | |
 |---|---|
-| **Left click** | she gives you a paw and says something |
+| **Left click** | she gives you a paw and says something; on the end-of-day sign, puts it down |
 | **Drag** | move her along the screen |
-| **Right click** | today's one thing, come here, high five, milk, I drank, say something, take a break, cart on/off, rename / recolour, close |
+| **Right click** | today's one thing, come here, high five, milk, I drank, say something, take a break, skip the break, break in 10 minutes, cart on/off, rename / recolour, close |
 
 ## Platform support
 
@@ -86,8 +107,12 @@ Windows-only and degrade quietly elsewhere:
 |---|---|---|
 | Transparent background | yes | no, she sits on a small cream card |
 | Knowing you left the desk | yes | assumes you are always there |
-| Hiding on screen share | yes | no |
+| Hiding behind fullscreen apps | yes | no |
+| Standing on the taskbar, wherever it is | yes, from the work area | assumes a bar 40 px tall at the bottom |
+| Sharp on high-DPI displays | yes, she scales with the display | depends on Tk |
 | Everything else | yes | yes |
+
+She lives along the bottom of the main monitor.
 
 The tests run on Windows, macOS and Linux in CI, but day to day she has only
 been lived with on Windows. Under Wayland her borderless window may not stay
@@ -100,12 +125,15 @@ There is no networking code in `kocicka.py` at all: no `socket`, `urllib`,
 `http` or `subprocess`, which you can check with a quick search. What she does
 touch:
 
-- **`kocka.json`** next to the script: her name and colour, the day you met,
-  today's one thing, and today's water count. It is in `.gitignore`.
-- **On Windows, two questions to the OS**, once a second: how long since the
-  last key press or mouse move (`GetLastInputInfo`, a single timestamp, never
-  which keys), and whether the window in front covers the whole screen
-  (`GetForegroundWindow` and `GetWindowRect`, never its title or contents).
+- **`kocka.json`** in your config folder (see above): her name and colour,
+  the day you met, today's one thing, and today's water count.
+- **On Windows, a few questions to the OS**, once a second: how long since
+  the last key press or mouse move (`GetLastInputInfo`, a single timestamp,
+  never which keys); whether the window in front fills its monitor
+  (`GetForegroundWindow`, its style, its rectangle, `MonitorFromWindow` and
+  `GetMonitorInfoW`, plus its class name only to tell the desktop wallpaper
+  apart, never its title or contents); and where the taskbar leaves room
+  (`SystemParametersInfoW`).
 
 ## Configuration
 
@@ -118,15 +146,18 @@ The constants at the top of `kocicka.py` are meant to be edited:
 | `PAUSE_SECS = 30` | how long a break lasts |
 | `WATER_GOAL = 6` | glasses before she stops nagging |
 | `AWAY_AFTER = 300` | seconds of no input before she assumes you left |
+| `SNOOZE = 600` | how far "break in 10 minutes" pushes it |
+| `END_AFTER_WORK = 1800` | work today before the end-of-day sign can show |
 | `NIGHT = (22, 7)` | when she sleeps |
-| `TASKBAR = 60` | raise this if she overlaps your taskbar |
+| `TASKBAR = 40` | macOS and Linux only: raise this if she overlaps your dock or panel |
 
 ## Language
 
-Everything she says lives in the `LINES`, `MEOWS`, `HAIRBALL_SAYS`,
-`BUTT_SAYS`, `BACK_SAYS`, `PAUSE_COACH` and `END_COACH` lists, and they are in
-Czech, written to a woman (Czech grammar marks it). A few, to give you the
-voice:
+All the text she shows, from her pep talks to the menu and the signs, lives
+in one table, `STRINGS`, at the top of `kocicka.py` (a test checks that no
+Czech has crept in anywhere else). It is Czech only for now, and it talks to a
+woman: Czech grammar marks it ("napila jsem se", "ty bys neměla"). There is no
+language switch yet. A few lines, to give you the voice:
 
 | | |
 |---|---|
@@ -134,13 +165,15 @@ voice:
 | *pauza není lenost, je to strategie. zeptej se koček* | a break is not laziness, it is strategy. ask any cat |
 | *ramena dozadu a dolů. celý den je držíš u uší* | shoulders back and down. you've had them by your ears all day |
 
-An English set is the most useful contribution anyone could make.
+An English table, written in her voice rather than translated word for word,
+is the most useful contribution anyone could make.
 
 ## Checking it works
 
 ```
-python kocicka.py --selftest              # her built-in check, no window
+python kocicka.py --selftest              # a quick check, then tests/ if it is next to her
 python -m unittest discover -s tests      # the test suite (drawing tests need a display)
+ruff check .                              # lint, as CI runs it
 python tools/pose.py                      # every pose side by side, to check the drawing
 python tools/pose.py break                # the break sign, frozen mid-countdown
 python kocicka.py --demo                  # speeds the timers up so you see a break now
@@ -172,7 +205,9 @@ vyblije chlupy, občas vyleze z vozíku a zdřímne si vedle něj. Každých pá
 minut ti řekne něco povzbuzujícího. Jednou za hodinu **skutečné práce** tě
 zastaví, zvedne ceduli STOP a vede tě protahováním a dýcháním 4-7-8.
 Odpoledne ti řekne, ať to zavřeš. Pozná, když nejsi u počítače, a schová se,
-když sdílíš obrazovku.
+když je vepředu aplikace přes celou obrazovku (prezentace, hovor nebo video
+na celou obrazovku). Jestli sdílíš obrazovku, poznat neumí: když sdílíš
+obyčejné okno nebo celou plochu, zůstane vidět.
 
 **Chceš přispět?** Viz [CONTRIBUTING.md](CONTRIBUTING.md). Nejvíc by teď
 pomohly překlady hlášek a podpora macOS a Linuxu.

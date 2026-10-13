@@ -1,0 +1,12 @@
+# ruff check .   (CI pins the version)
+target-version = "py310"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "B", "UP", "SIM"]
+# %-formatting stays on purpose: every user-facing string in STRINGS uses it, and the
+# code that fills them in should read the same way
+ignore = ["UP031"]
+
+[lint.per-file-ignores]
+"tools/gen_md.py" = ["E501"]   # the Czech guide's prose and tables, not code

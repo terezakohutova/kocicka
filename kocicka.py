@@ -3,34 +3,43 @@
 
 stdlib only (tkinter + ctypes), no assets, no install, nothing leaves your machine.
 On the first run she asks for a name and a colour; after that she remembers both in
-kocka.json and comes back the same cat. She notices when you step away, shuts up when
-you share your screen, stops you for a stretch once an hour of actual work, and calls
-it a day when the day is done.
+her config file (see config_dir) and comes back the same cat. She notices when you step
+away, gets out of the way of fullscreen apps, stops you for a stretch once an hour of
+actual work, and calls it a day when the day is done.
   run:        python kocicka.py
   demo:       python kocicka.py --demo        (speeds the timers up so you see it now)
-  self-check: python kocicka.py --selftest
+  self-check: python kocicka.py --selftest    (also runs tests/ when it sits next to her)
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import json
 import math
+import os
 import random
+import shutil
 import sys
+import tempfile
 import time
 from datetime import date, datetime
 from pathlib import Path
 
 W, H = 200, 230      # window size: cat in the bottom, speech bubble on top
 GROUND = 210         # floor line inside the window
-TASKBAR = 60         # fixed taskbar margin, bump it if she overlaps your taskbar
+TASKBAR = 40         # bottom margin where the OS won't tell us its work area (macOS, Linux)
 SPEED = 1.6          # px per frame while rolling
-TICK = 40            # ms per frame
-SLOW = 25            # how many frames between the expensive Windows checks
+TICK = 40            # ms per frame while she rolls, coughs or holds the sign (twice that
+                     # while she just sits and breathes)
+TICK_SLEEP = 250     # ms per frame while she sleeps or naps: nothing moves fast then
+TICK_HIDDEN = 500    # ms per frame while she is hidden: only the counting goes on
+SLOW_EVERY = 1.0     # seconds between the expensive OS checks
 LINE_EVERY = (180, 420)   # seconds between her little pep talks
 PAUSE_EVERY = 3600        # seconds of ACTUAL work between the big stop-everything breaks
 PAUSE_SECS = 30           # how long a break lasts
+SNOOZE = 600              # "later" from the menu pushes the break this far off
 END_SECS = 45             # how long the end-of-day wind-down lasts
+END_AFTER_WORK = 1800     # no end-of-day sign until you've worked this long today
 PAUSE_ZOOM = 2.0          # how much bigger she gets while holding the sign
 PAUSE_EXTRA = 60          # headroom the window grows so the sign clears her ears
 COACH_EVERY = 6           # seconds each stretch prompt stays up during the countdown
@@ -45,126 +54,173 @@ PALETTES = {         # fur, shading/legs, nose
     "smetanova": ("#f0dfc2", "#c9ab82", "#f2a0a8"),
     "cerna": ("#55555f", "#33333a", "#e6909c"),
 }
-PALETTE_LABELS = (("zrzava", "zrzavá"), ("seda", "šedá"),
-                  ("smetanova", "smetanová"), ("cerna", "černá"))
-FUR, DARK, PINK = PALETTES["zrzava"]
+DEFAULT_FUR = "zrzava"
 EYE, MOUTH = "#3b2b20", "#8a3a45"
 KEY = "#ff00ff"      # transparent colour key (Windows only)
 
 WHEEL_R = 20         # rear-wheel cart for a cat whose back legs don't carry her
 FRAME, TIRE, RIM, STRAP = "#9aa0a8", "#3f3f46", "#c9ccd1", "#d2533f"
 BOWL, MILK, GRASS, STAR = "#cfd6de", "#fdfdfb", "#7ba05b", "#d97757"
-
-CONFIG = Path(__file__).with_name("kocka.json")   # her name and colour, kept between runs
-FALLBACK_NAME = "Kočička"
 PAPER, INK, MUTED = "#faf7f2", "#2b2b2b", "#6b6b6b"
+FONT = "Segoe UI"
 
-# everything she says: encouraging, funny, and always from a cat's point of view
-LINES = [
-    "devět životů, dneska stačí zvládnout ten jeden",
-    "i kočka spadne. jen pak tváří, že to bylo schválně",
-    "protáhni se. děláme to 40× denně a koukni, jak vypadáme",
-    "kdybys byla kočka, tohle už dávno shodíš ze stolu",
-    "nikdo nemá všechno pod kontrolou. my to jen líp hrajeme",
-    "mrrr. to znamená, že ti fandím",
-    "dýchej zhluboka. příst se jinak nedá",
-    "dneska stačí být o chlup lepší. doslova o chlup",
-    "když nevíš kudy dál, sedni si do krabice. mně to pomáhá",
-    "napij se. já vodu z misky taky ignoruju, ale ty bys neměla",
-    "koukat z okna je taky práce. dělám ji šest hodin denně",
-    "rozbilo se to? nic se neděje. já to dělám schválně",
-    "tvůj seznam úkolů není tvých devět životů",
-    "postav se a protáhni. shodím ti za to něco ze stolu",
-    "jdeš správným směrem, jen pomaleji než myš. to nevadí",
-    "i nejlepší lovec občas mine. pak dělá, že nelovil",
-    "dej si pauzu, klávesnici ti tu pohlídám",
-    "tohle zvládneš. věř kočce, my ty věci cítíme dopředu",
-    "nemusíš příst pořád. někdy stačí jen ležet",
-    "pauza není lenost, je to strategie. zeptej se koček",
-    "tvoje židle je teď moje. ber to jako pozvánku vstát",
-    "hlavu vzhůru, uši dozadu, jdeme na to",
-    "kdyby to bylo lehké, neměla bys radost. ani já z krabice",
-    "zamrkej. já to dělám pomalu a znamená to, že tě mám ráda",
-    "spadlo to ze stolu? tak tam nemělo co dělat",
-    "dneska jsi toho zvládla dost. věř mi, já tu byla celou dobu",
-    "když se ti nechce, lehni si na to. já to řeším vždycky takhle",
-    "nemusíš se líbit všem. já se líbím, jen když mám hlad",
-    "zavři pět záložek. i já mám v hlavě jen jednu myš",
-    "když ti to nejde, zkus to z druhé strany. nebo shora",
-    "první pokus nevyšel? proto máme těch devět životů",
-    "slunce na klávesnici znamená pauzu. to je zákon",
-    "nejlepší nápady mám ve tři ráno. tobě je radši neřeknu",
-    "nemusíš běhat. kočky chodí a stejně jsou všude dřív",
-    "spočítej do deseti a pak to pošli. nebo to shoď ze stolu",
-    "ty maily ti neutečou. hlídám je, jsou pomalé jako želvy",
-    "chce to sednout a začít. já si sedám klidně půl hodiny",
-    "když se bojíš, nafoukni se. mně to na psy funguje",
-    "dneska nemusíš být velká kočka. stačí být kočka",
-    "tvoje hodnota není v počtu odškrtnutých políček",
-    "kdo pořád kouká na hodiny, nikdy nechytí myš",
-    "máš hlad? jdi se najíst. já bych ti to řekla už dávno",
-    "čaj vystydl. to je znamení, že u toho sedíš moc dlouho",
-    "koukáním se to nespraví. leda já, na mě koukej dál",
-    "když je toho moc, dělej jednu věc. já dělám tuhle: spím",
-    "tvoje ráno začíná, až se protáhneš. ani o chvíli dřív",
-    "nechala sis to na později? později je taky dneska",
-    "buď na sebe hodná. jsi jediná, kterou máš",
-    "jsi rychlejší, než si myslíš. jenom šetříš energii",
-    "shodila jsem to já. ale mohl to být i průvan",
-    "když nevíš, co říct, mlč a koukej. mně to vždycky projde",
-    "tvoje hlava není stroj. je to kočka. potřebuje spát",
-    "ta práce tu byla před tebou a bude tu i po tobě",
-    "nedělej deset věcí naráz. ani já nemám deset tlapek",
-    "když tě někdo štve, otoč se k němu zády. naučím tě to",
-    "pochval se nahlas. já si předu i sama pro sebe",
-    "nejde to? nech to uležet. ráno je moudřejší než večer",
-    "úkol, kterého se bojíš, bývá tak na deset minut",
-    "dej si teplý čaj a chvíli nic. v tom je celé kouzlo",
-    "nemusíš odpovídat hned. já se ozvu, až budu mít hlad",
-    "srovnávat se s ostatními je jak honit vlastní ocas",
-    "dneska stačí přežít. zítra jdeme zase lovit",
-    "nikdo tě nehlídá. teda kromě mě, ale já držím basu",
-    "je ti zima? přitáhni si deku. ta práce počká v teple",
-    "strach z chyby bývá větší než ta chyba. věř kočce",
-    "polož ten telefon. není v něm nic, co bych nevěděla",
-    "nádech na čtyři, výdech na šest. předu s tebou",
-    "nemusíš mít hotovo. dneska stačí mít začato",
-    "pochybnosti nech spát. zrovna na nich ležím",
-    "zavolej jí. já bych na ni aspoň mňoukla",
-    "napsat to blbě je pořád lepší než nenapsat nic",
-    "až budeš unavená, přijď si lehnout. udělám ti místo",
-    "zamkni ten mail a jdi na vzduch. já hlídám okno",
-    "co je rozdělané, není pokažené. jen to čeká",
-    "všechno nestihneš. ani já neolíznu celou tlapku naráz",
-    "dneska jsi udělala víc, než si pamatuješ. já to počítám",
-]
-MEOWS = ["mňau", "mrrrp", "mňaaau", "prrr", "mrr?"]
-HAIRBALL_SAYS = ["hrk... hrk...", "ehm. moment", "nekoukej na mě"]
-BUTT_SAYS = ["tohle je pro tebe", "*ocas nahoru*", "koukej", "tak co"]
-BACK_SAYS = ["a jsi zpátky", "kde jsi byla?", "hlídala jsem ti to", "*protahuje se*"]
-
-# what she coaches you through while the countdown runs
-PAUSE_COACH = [
-    "postav se a protáhni se. jako kočka po spaní",
-    "ruce nad hlavu, záda do oblouku. drž to a dýchej",
-    "otoč hlavu doleva a doprava. pomalu, nikam nespěcháme",
-    "ramena dozadu a dolů. celý den je držíš u uší",
-    "koukni se z okna na něco daleko. oči si odpočinou",
-    "protáhni krk. celý den koukáš dolů jako na myš",
-    "postav se na špičky a natáhni se ke stropu",
-    "zatoč rameny dozadu. pětkrát. počítám s tebou",
-    "sedni si rovně a zhluboka se nadechni. třikrát",
-    "protřep ruce a zápěstí. píšeš od rána",
-]
-END_COACH = [
-    "zavři to. zítra to tam bude pořád",
-    "co nestihneš dneska, uteče pomalu jako stará myš",
-    "šichta končí. jdi si lehnout do krabice",
-    "hotovo je líp než dokonalé. ptej se koček",
-    "postav se. dneska už na tu židli nesedej",
-    "protáhni se naposled a jdi pryč od stolu",
-    "dobrá práce. teď ji nech být",
-]
+# Every word she shows you, in one place. Czech only for now, and she talks to a woman
+# (Czech grammar marks it: "napila jsem se", "ty bys neměla"). A translation is a second
+# table of this same shape; please write it in her voice rather than translating word
+# for word.
+STRINGS = {
+    # encouraging, funny, and always from a cat's point of view
+    "lines": [
+        "devět životů, dneska stačí zvládnout ten jeden",
+        "i kočka spadne. jen pak tváří, že to bylo schválně",
+        "protáhni se. děláme to 40× denně a koukni, jak vypadáme",
+        "kdybys byla kočka, tohle už dávno shodíš ze stolu",
+        "nikdo nemá všechno pod kontrolou. my to jen líp hrajeme",
+        "mrrr. to znamená, že ti fandím",
+        "dýchej zhluboka. příst se jinak nedá",
+        "dneska stačí být o chlup lepší. doslova o chlup",
+        "když nevíš kudy dál, sedni si do krabice. mně to pomáhá",
+        "napij se. já vodu z misky taky ignoruju, ale ty bys neměla",
+        "koukat z okna je taky práce. dělám ji šest hodin denně",
+        "rozbilo se to? nic se neděje. já to dělám schválně",
+        "tvůj seznam úkolů není tvých devět životů",
+        "postav se a protáhni. shodím ti za to něco ze stolu",
+        "jdeš správným směrem, jen pomaleji než myš. to nevadí",
+        "i nejlepší lovec občas mine. pak dělá, že nelovil",
+        "dej si pauzu, klávesnici ti tu pohlídám",
+        "tohle zvládneš. věř kočce, my ty věci cítíme dopředu",
+        "nemusíš příst pořád. někdy stačí jen ležet",
+        "pauza není lenost, je to strategie. zeptej se koček",
+        "tvoje židle je teď moje. ber to jako pozvánku vstát",
+        "hlavu vzhůru, uši dozadu, jdeme na to",
+        "kdyby to bylo lehké, neměla bys radost. ani já z krabice",
+        "zamrkej. já to dělám pomalu a znamená to, že tě mám ráda",
+        "spadlo to ze stolu? tak tam nemělo co dělat",
+        "dneska jsi toho zvládla dost. věř mi, já tu byla celou dobu",
+        "když se ti nechce, lehni si na to. já to řeším vždycky takhle",
+        "nemusíš se líbit všem. já se líbím, jen když mám hlad",
+        "zavři pět záložek. i já mám v hlavě jen jednu myš",
+        "když ti to nejde, zkus to z druhé strany. nebo shora",
+        "první pokus nevyšel? proto máme těch devět životů",
+        "slunce na klávesnici znamená pauzu. to je zákon",
+        "nejlepší nápady mám ve tři ráno. tobě je radši neřeknu",
+        "nemusíš běhat. kočky chodí a stejně jsou všude dřív",
+        "spočítej do deseti a pak to pošli. nebo to shoď ze stolu",
+        "ty maily ti neutečou. hlídám je, jsou pomalé jako želvy",
+        "chce to sednout a začít. já si sedám klidně půl hodiny",
+        "když se bojíš, nafoukni se. mně to na psy funguje",
+        "dneska nemusíš být velká kočka. stačí být kočka",
+        "tvoje hodnota není v počtu odškrtnutých políček",
+        "kdo pořád kouká na hodiny, nikdy nechytí myš",
+        "máš hlad? jdi se najíst. já bych ti to řekla už dávno",
+        "čaj vystydl. to je znamení, že u toho sedíš moc dlouho",
+        "koukáním se to nespraví. leda já, na mě koukej dál",
+        "když je toho moc, dělej jednu věc. já dělám tuhle: spím",
+        "tvoje ráno začíná, až se protáhneš. ani o chvíli dřív",
+        "nechala sis to na později? později je taky dneska",
+        "buď na sebe hodná. jsi jediná, kterou máš",
+        "jsi rychlejší, než si myslíš. jenom šetříš energii",
+        "shodila jsem to já. ale mohl to být i průvan",
+        "když nevíš, co říct, mlč a koukej. mně to vždycky projde",
+        "tvoje hlava není stroj. je to kočka. potřebuje spát",
+        "ta práce tu byla před tebou a bude tu i po tobě",
+        "nedělej deset věcí naráz. ani já nemám deset tlapek",
+        "když tě někdo štve, otoč se k němu zády. naučím tě to",
+        "pochval se nahlas. já si předu i sama pro sebe",
+        "nejde to? nech to uležet. ráno je moudřejší než večer",
+        "úkol, kterého se bojíš, bývá tak na deset minut",
+        "dej si teplý čaj a chvíli nic. v tom je celé kouzlo",
+        "nemusíš odpovídat hned. já se ozvu, až budu mít hlad",
+        "srovnávat se s ostatními je jak honit vlastní ocas",
+        "dneska stačí přežít. zítra jdeme zase lovit",
+        "nikdo tě nehlídá. teda kromě mě, ale já držím basu",
+        "je ti zima? přitáhni si deku. ta práce počká v teple",
+        "strach z chyby bývá větší než ta chyba. věř kočce",
+        "polož ten telefon. není v něm nic, co bych nevěděla",
+        "nádech na čtyři, zadrž na sedm, výdech na osm. předu s tebou",
+        "nemusíš mít hotovo. dneska stačí mít začato",
+        "pochybnosti nech spát. zrovna na nich ležím",
+        "zavolej jí. já bych na ni aspoň mňoukla",
+        "napsat to blbě je pořád lepší než nenapsat nic",
+        "až budeš unavená, přijď si lehnout. udělám ti místo",
+        "zamkni ten mail a jdi na vzduch. já hlídám okno",
+        "co je rozdělané, není pokažené. jen to čeká",
+        "všechno nestihneš. ani já neolíznu celou tlapku naráz",
+        "dneska jsi udělala víc, než si pamatuješ. já to počítám",
+    ],
+    "meows": ["mňau", "mrrrp", "mňaaau", "prrr", "mrr?"],
+    "hairball": ["hrk... hrk...", "ehm. moment", "nekoukej na mě"],
+    "butt": ["tohle je pro tebe", "*ocas nahoru*", "koukej", "tak co"],
+    "back": ["a jsi zpátky", "kde jsi byla?", "hlídala jsem ti to", "*protahuje se*"],
+    # what she coaches you through while the countdown runs
+    "pause_coach": [
+        "postav se a protáhni se. jako kočka po spaní",
+        "ruce nad hlavu, záda do oblouku. drž to a dýchej",
+        "otoč hlavu doleva a doprava. pomalu, nikam nespěcháme",
+        "ramena dozadu a dolů. celý den je držíš u uší",
+        "koukni se z okna na něco daleko. oči si odpočinou",
+        "protáhni krk. celý den koukáš dolů jako na myš",
+        "postav se na špičky a natáhni se ke stropu",
+        "zatoč rameny dozadu. pětkrát. počítám s tebou",
+        "sedni si rovně a zhluboka se nadechni. třikrát",
+        "protřep ruce a zápěstí. píšeš od rána",
+    ],
+    "end_coach": [
+        "zavři to. zítra to tam bude pořád",
+        "co nestihneš dneska, uteče pomalu jako stará myš",
+        "šichta končí. jdi si lehnout do krabice",
+        "hotovo je líp než dokonalé. ptej se koček",
+        "postav se. dneska už na tu židli nesedej",
+        "protáhni se naposled a jdi pryč od stolu",
+        "dobrá práce. teď ji nech být",
+    ],
+    "breath": ("nádech", "zadrž", "výdech"),       # 4-7-8: in, hold, out
+    # the signs
+    "sign_break": ("STOP", "teď pauzička"),
+    "sign_end": ("ŠICHTA KONČÍ", "hotovo. zavři to"),
+    "sign_count": "%d s  ·  %s",
+    # her memory and the day
+    "fallback_name": "Kočička",
+    "hello": "ahoj, jsem %s",
+    "missed_you": "chyběla jsi mi! %s jsme se neviděly",
+    "day_n": "zase já. jsme spolu %d. den",
+    "days": ("den", "dny", "dní"),                 # 1, 2-4, 5+
+    "water_none": "dneska ses ještě nenapila. ani jednou. koukám",
+    "water_some": "dneska jsme to daly %d×. na kočku dobrý, na člověka málo",
+    "water_count": "%d. dneska. ještě %d",
+    "water_done": "%d. a to je ono",
+    "focus_none": "dnes: (nic)",
+    "focus_today": "dnes: ",
+    "focus_done": "hotovo: ",
+    "focus_proud": "jsem na tebe pyšná",
+    "focus_undo": "tak jo, jedem dál",
+    "focus_title": "Jedna věc",
+    "focus_ask": "Co je dneska ta jedna věc, kterou chceš mít hotovou?",
+    "renamed": "teď jsem %s",
+    "skipped": "dobře, tentokrát ne. ale příště jo",
+    "snoozed": "tak za deset minut. budu to hlídat",
+    "cant_save": "nemůžu si nic zapamatovat, nejde mi zapisovat do složky",
+    # the welcome window
+    "welcome_title": "Vítej!",
+    "welcome_head": "Máš novou kočku.",
+    "welcome_sub": "Vyber jí barvu a dej jí jméno.",
+    "welcome_name": "Jak se bude jmenovat?",
+    "welcome_go": "Pojď ke mně!",
+    "fur_labels": (("zrzava", "zrzavá"), ("seda", "šedá"),
+                   ("smetanova", "smetanová"), ("cerna", "černá")),
+    # the right-click menu
+    "menu_come": "pojď sem",
+    "menu_paw": "dej packu",
+    "menu_milk": "mlíčko",
+    "menu_drank": "napila jsem se",
+    "menu_say": "řekni něco",
+    "menu_break": "dáme pauzu",
+    "menu_skip": "přeskočit pauzu",
+    "menu_snooze": "pauzu až za 10 minut",
+    "menu_cart": "vozíček",
+    "menu_rename": "přejmenovat / barva",
+    "menu_close": "zavřít",
+}
 
 # what she gets up to on her own, and how long each one lasts
 TRICKS = ("walk", "walk", "walk", "idle", "lick", "meow", "milk", "grass",
@@ -184,8 +240,14 @@ class _RECT(ctypes.Structure):
                 ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
 
 
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", _RECT), ("rcWork", _RECT),
+                ("dwFlags", ctypes.c_ulong)]
+
+
 _LII = _LASTINPUTINFO()
 _LII.cbSize = ctypes.sizeof(_LII)
+_DESKTOP_CLASSES = ("Progman", "WorkerW")   # the desktop itself: fullscreen, but not an app
 
 
 def _load_win32():
@@ -200,6 +262,12 @@ def _load_win32():
     user32.GetWindowLongW.argtypes = (hwnd, ctypes.c_int)
     user32.GetWindowLongW.restype = ctypes.c_long
     user32.GetWindowRect.argtypes = (hwnd, ctypes.POINTER(_RECT))
+    user32.GetClassNameW.argtypes = (hwnd, ctypes.c_wchar_p, ctypes.c_int)
+    user32.MonitorFromWindow.argtypes = (hwnd, ctypes.c_uint32)
+    user32.MonitorFromWindow.restype = ctypes.c_void_p
+    user32.GetMonitorInfoW.argtypes = (ctypes.c_void_p, ctypes.POINTER(_MONITORINFO))
+    user32.SystemParametersInfoW.argtypes = (ctypes.c_uint, ctypes.c_uint,
+                                             ctypes.POINTER(_RECT), ctypes.c_uint)
     kernel32.GetTickCount.restype = ctypes.c_uint32
     return user32, kernel32
 
@@ -212,6 +280,10 @@ def _win32():
     return _USER32, _KERNEL32
 
 
+def _box(r: _RECT) -> tuple:
+    return (r.left, r.top, r.right, r.bottom)
+
+
 def idle_seconds() -> float:
     """Seconds since you last touched the keyboard or mouse. 0 where we can't tell."""
     user32, kernel32 = _win32()
@@ -221,8 +293,17 @@ def idle_seconds() -> float:
     return ((kernel32.GetTickCount() - _LII.dwTime) % (2 ** 32)) / 1000.0
 
 
-def sharing_screen() -> bool:
-    """True when the front window covers the whole screen: a call, a slideshow, a video."""
+def covers(window: tuple, monitor: tuple) -> bool:
+    """True when the window rectangle reaches every edge of the monitor rectangle."""
+    return (window[0] <= monitor[0] and window[1] <= monitor[1]
+            and window[2] >= monitor[2] and window[3] >= monitor[3])
+
+
+def fullscreen_in_front() -> bool:
+    """True when the window in front fills its whole monitor without a title bar: a
+    slideshow, a fullscreen call or video, a game. That is all it can tell. It can't see
+    whether you are sharing your screen, so a shared window that isn't fullscreen does
+    not hide her. Asks only for the window's style, size and class, never its title."""
     user32, _ = _win32()
     if not user32:
         return False
@@ -231,19 +312,61 @@ def sharing_screen() -> bool:
         return False
     if user32.GetWindowLongW(hwnd, -16) & 0x00C00000:   # GWL_STYLE & WS_CAPTION
         return False       # it still has a title bar, so it's only maximised, not fullscreen
+    name = ctypes.create_unicode_buffer(32)
+    user32.GetClassNameW(hwnd, name, 32)
+    if name.value in _DESKTOP_CLASSES:
+        return False       # you clicked the wallpaper; that isn't a presentation
     rect = _RECT()
     if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
         return False
-    return (rect.right - rect.left >= user32.GetSystemMetrics(0)
-            and rect.bottom - rect.top >= user32.GetSystemMetrics(1))
+    monitor = user32.MonitorFromWindow(hwnd, 2)          # MONITOR_DEFAULTTONEAREST
+    info = _MONITORINFO()
+    info.cbSize = ctypes.sizeof(_MONITORINFO)
+    if not monitor or not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+        return False
+    return covers(_box(rect), _box(info.rcMonitor))
+
+
+def work_area(screen_w: int, screen_h: int) -> tuple:
+    """(left, top, right, bottom) of the primary screen minus the taskbar, wherever it is
+    docked. Windows says exactly; elsewhere we guess TASKBAR pixels off the bottom."""
+    user32, _ = _win32()
+    if user32:
+        r = _RECT()
+        got = user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0)   # SPI_GETWORKAREA
+        if got and r.right > r.left and r.bottom > r.top:
+            return _box(r)
+    return (0, 0, screen_w, max(H, screen_h - TASKBAR))
+
+
+def set_dpi_awareness() -> str:
+    """Tell Windows we draw at real pixels, so she is crisp instead of blurry-stretched.
+    Must run before the first Tk window. Returns what it managed, for the curious."""
+    try:
+        windll = ctypes.windll
+    except AttributeError:
+        return "not windows"
+    try:
+        windll.shcore.SetProcessDpiAwareness(2)          # per-monitor (Windows 8.1+)
+        return "per-monitor"
+    except (AttributeError, OSError):
+        pass
+    try:
+        windll.user32.SetProcessDPIAware()               # system-wide (Vista+)
+        return "system"
+    except (AttributeError, OSError):
+        return "none"
 
 
 # --------------------------------------------------------------------------- behaviour
 
 class Pet:
-    """Position + behaviour. No tkinter in here, so it can be tested headless."""
+    """Position + behaviour. No tkinter in here, so it can be tested headless.
 
-    def __init__(self, screen_w: int, x: float | None = None):
+    Positions are in her own units (one unit is one pixel at 100 % display scaling).
+    """
+
+    def __init__(self, screen_w: float, x: float | None = None):
         self.screen_w = screen_w
         self.x = screen_w // 2 if x is None else x
         self.dir = 1
@@ -251,9 +374,10 @@ class Pet:
         self.until = 0.0
         self.say = ""
         self.say_until = 0.0
-        self.extra = []      # lines run() wants her to say today, on top of LINES
+        self.extra = []      # lines the app wants her to say today, on top of the usual
         self.next_line = time.time() + random.uniform(*LINE_EVERY)
         self.worked = 0.0    # seconds of real work since her last break
+        self.total = 0.0     # seconds of real work since she started, never reset
         self.last_step = 0.0
         self.kind = "break"  # which sign the current pause is showing
         self.pause_until = 0.0
@@ -264,10 +388,16 @@ class Pet:
         self.progress = 0.0  # 0 -> 1 through the current state, for timed animations
         self.cart = True     # rear-wheel cart: rear legs ride in slings, wheels carry her
         self.roll = 0.0      # distance rolled, drives the spoke rotation
+        self.fur = DEFAULT_FUR
 
     @property
-    def max_x(self) -> int:
+    def max_x(self) -> float:
         return max(0, self.screen_w - W)
+
+    @property
+    def colours(self) -> tuple:
+        """(fur, shading, nose) for her coat."""
+        return PALETTES.get(self.fur, PALETTES[DEFAULT_FUR])
 
     def asleep(self, hour: int) -> bool:
         return hour >= NIGHT[0] or hour < NIGHT[1]
@@ -275,18 +405,32 @@ class Pet:
     def speak(self, text: str, now: float, secs: float = 4) -> None:
         self.say, self.say_until = text, now + secs
 
+    def chatter(self, now: float) -> None:
+        self.speak(random.choice(STRINGS["lines"] + self.extra), now, 7)
+
     def do(self, state: str, now: float, secs: float | None = None) -> None:
+        """Switch to a state for secs seconds, or for its usual random length if None."""
         self.state = state
         self.started = now
-        self.until = now + (secs if secs else random.uniform(*DURATION.get(state, (2.5, 6))))
+        if secs is None:
+            secs = random.uniform(*DURATION.get(state, (2.5, 6)))
+        self.until = now + secs
 
     def start_pause(self, now: float, kind: str = "break") -> None:
         span = PAUSE_SECS if kind == "break" else END_SECS
-        prompts = PAUSE_COACH if kind == "break" else END_COACH
+        prompts = STRINGS["pause_coach" if kind == "break" else "end_coach"]
         self.state, self.dir, self.say, self.kind = "pause", 1, "", kind
         self.pause_until, self.pause_span = now + span, float(span)
         self.worked = 0.0
         self.coach = random.sample(prompts, k=min(len(prompts), max(1, span // COACH_EVERY)))
+
+    def finish_pause(self, now: float, lie_down: bool = True) -> None:
+        """Put the sign down: on time, or early when you dismiss or skip it."""
+        self.breath, self.pause_until = 0.0, min(self.pause_until, now)
+        if self.kind == "end" and lie_down:
+            self.do("rest", now, 90)           # shift's over, she lies down with you
+        else:
+            self.state, self.until = "idle", 0.0
 
     def pause_left(self, now: float) -> int:
         return max(0, math.ceil(self.pause_until - now))
@@ -308,15 +452,18 @@ class Pet:
 
     def _breathe(self, now: float) -> None:
         """4-7-8: her whole body does it so you can follow the cat instead of the text."""
+        inhale, hold, exhale = STRINGS["breath"]
         cycle = (now - (self.pause_until - self.pause_span)) % 19.0
         if cycle < 4:
-            self.breath, self.breath_word = cycle / 4.0, "nádech"
+            self.breath, self.breath_word = cycle / 4.0, inhale
         elif cycle < 11:
-            self.breath, self.breath_word = 1.0, "zadrž"
+            self.breath, self.breath_word = 1.0, hold
         else:
-            self.breath, self.breath_word = 1.0 - (cycle - 11) / 8.0, "výdech"
+            self.breath, self.breath_word = 1.0 - (cycle - 11) / 8.0, exhale
 
-    def step(self, now: float, hour: int, away: bool = False) -> str:
+    def step(self, now: float, hour: int, away: bool = False, hidden: bool = False) -> str:
+        """Advance her by one frame. While hidden (a fullscreen app is in front) your work
+        still counts, but she keeps quiet and a due break waits until she is back."""
         dt = min(2.0, max(0.0, now - self.last_step)) if self.last_step else 0.0
         self.last_step = now
         if self.say and now > self.say_until:
@@ -325,11 +472,7 @@ class Pet:
         if self.state == "pause":
             self._breathe(now)
             if now >= self.pause_until:
-                self.breath = 0.0
-                if self.kind == "end":
-                    self.do("rest", now, 90)   # shift's over, she lies down with you
-                else:
-                    self.state, self.until = "idle", 0.0
+                self.finish_pause(now)
             return self.state
 
         if self.asleep(hour):
@@ -344,16 +487,20 @@ class Pet:
         if self.state in ("sleep", "away"):
             if self.state == "away":
                 self.do("idle", now, 3)        # a beat to notice you, before anything else
-                self.speak(random.choice(BACK_SAYS), now, 5)
+                self.speak(random.choice(STRINGS["back"]), now, 5)
             else:
                 self.state, self.until = "idle", 0.0
 
         self.worked += dt                      # only counts while you are actually here
+        self.total += dt
+        if hidden:                             # nobody can see her: count, but say nothing
+            self.next_line = max(self.next_line, now + 5)
+            return self.state
         if self.worked >= PAUSE_EVERY:
             self.start_pause(now)
             return self.state
         if now >= self.next_line:
-            self.speak(random.choice(LINES + self.extra), now, 7)
+            self.chatter(now)
             self.next_line = now + random.uniform(*LINE_EVERY)
         if now >= self.until:
             if self.state == "grass" and random.random() < 0.7:
@@ -364,11 +511,11 @@ class Pet:
             if self.state == "walk":
                 self.dir = random.choice((-1, 1))
             elif self.state == "meow":
-                self.speak(random.choice(MEOWS), now, 2.5)
+                self.speak(random.choice(STRINGS["meows"]), now, 2.5)
             elif self.state == "hairball":
-                self.speak(random.choice(HAIRBALL_SAYS), now, 3)
+                self.speak(random.choice(STRINGS["hairball"]), now, 3)
             elif self.state == "butt":
-                self.speak(random.choice(BUTT_SAYS), now, 3)
+                self.speak(random.choice(STRINGS["butt"]), now, 3)
         span = max(0.001, self.until - self.started)
         self.progress = min(1.0, max(0.0, (now - self.started) / span))
         if self.state == "walk":
@@ -381,6 +528,15 @@ class Pet:
 
 
 # --------------------------------------------------------------------------- drawing
+
+def bowl_box(direction: int) -> tuple:
+    """Where her milk bowl sits (x1, y1, x2, y2), in unzoomed window units. She puts it
+    under her nose, so it swaps sides when she faces left."""
+    x1, x2 = 130, 176
+    if direction < 0:
+        x1, x2 = W - x2, W - x1
+    return (x1, GROUND - 18, x2, GROUND - 2)
+
 
 def starburst(c, cx, cy, r, angle, rays=11, colour=STAR):
     """A spinning many-pointed star. Also, apparently, what a cat shows you."""
@@ -396,30 +552,35 @@ def starburst(c, cx, cy, r, angle, rays=11, colour=STAR):
             fill=colour, outline="")
 
 
-def draw_bubble(c, pet, hy):
-    """Sized to the wrapped text and anchored above her head, never mirrored."""
+def draw_bubble(c, pet, hy, k=1.0):
+    """Sized to the wrapped text and anchored above her head, never mirrored. Drawn after
+    the zoom, at final size, so the text and its box always match."""
     if not pet.say:
         return
-    said = c.create_text(W // 2, hy - 42, text=pet.say, width=W - 30, anchor="s",
-                         justify="center", fill=INK, font=("Segoe UI", 9, "bold"))
+    dark = pet.colours[1]
+    mid = W // 2 * k
+    said = c.create_text(mid, (hy - 42) * k, text=pet.say, width=(W - 30) * k, anchor="s",
+                         justify="center", fill=INK, font=(FONT, -round(12 * k), "bold"),
+                         tags=("bubble",))
     x1, y1, x2, y2 = c.bbox(said)
     for dx, dy, r in ((16, 10, 5), (26, 20, 3)):
-        c.create_oval(W // 2 + dx, y2 + dy, W // 2 + dx + r * 2, y2 + dy + r * 2,
-                      fill="white", outline=DARK, width=2)
-    box = c.create_rectangle(x1 - 10, y1 - 7, x2 + 10, y2 + 7,
-                             fill="white", outline=DARK, width=2)
+        c.create_oval(mid + dx * k, y2 + dy * k, mid + (dx + r * 2) * k, y2 + (dy + r * 2) * k,
+                      fill="white", outline=dark, width=2 * k, tags=("bubble",))
+    box = c.create_rectangle(x1 - 10 * k, y1 - 7 * k, x2 + 10 * k, y2 + 7 * k,
+                             fill="white", outline=dark, width=2 * k, tags=("bubble",))
     c.tag_lower(box, said)
 
 
 def draw_rear(c, pet, frame):
     """She turns her back on you. What you get is a spinning star where her tail starts."""
+    fur, dark, _ = pet.colours
     cx, ay = W // 2, GROUND - WHEEL_R
     top, bottom = GROUND - 96, GROUND - 14
 
     if pet.cart:
         for wx in (cx - 54, cx + 54):
             c.create_oval(wx - WHEEL_R, ay - WHEEL_R, wx + WHEEL_R, ay + WHEEL_R,
-                          fill=TIRE, outline="")
+                          fill=TIRE, outline="", tags=("wheel",))
             c.create_oval(wx - WHEEL_R + 5, ay - WHEEL_R + 5,
                           wx + WHEEL_R - 5, ay + WHEEL_R - 5, fill=RIM, outline="")
             for k in range(3):
@@ -431,20 +592,20 @@ def draw_rear(c, pet, frame):
                       width=5, fill=FRAME, capstyle="round", joinstyle="round", smooth=True)
 
     for lx in (cx - 30, cx + 30):              # hind paws poking out below the rump
-        c.create_line(lx, bottom - 12, lx, GROUND, width=10, fill=DARK, capstyle="round")
+        c.create_line(lx, bottom - 12, lx, GROUND, width=10, fill=dark, capstyle="round")
 
     sway = math.sin(frame * 0.11) * 9          # tail straight up, the way they do it
     c.create_line(cx + 2, top + 26, cx + 8 + sway * 0.4, top - 14,
                   cx + 10 + sway, top - 44,
-                  width=9, fill=FUR, capstyle="round", smooth=True)
+                  width=9, fill=fur, capstyle="round", smooth=True)
 
-    c.create_oval(cx - 26, top - 30, cx + 26, top + 18, fill=FUR, outline="")   # back of head
+    c.create_oval(cx - 26, top - 30, cx + 26, top + 18, fill=fur, outline="")   # back of head
     for ex, tilt in ((cx - 17, -9), (cx + 17, 9)):
         c.create_polygon(ex - 9, top - 20, ex + tilt, top - 44, ex + 9, top - 18,
-                         fill=FUR, outline="")
-    c.create_oval(cx - 44, top, cx + 44, bottom, fill=FUR, outline="")          # the rump
+                         fill=fur, outline="")
+    c.create_oval(cx - 44, top, cx + 44, bottom, fill=fur, outline="")          # the rump
     for sx in (-22, 0, 22):                                                     # stripes
-        c.create_line(cx + sx, top + 10, cx + sx, top + 30, width=4, fill=DARK, capstyle="round")
+        c.create_line(cx + sx, top + 10, cx + sx, top + 30, width=4, fill=dark, capstyle="round")
 
     # a pale patch so the star reads on any coat, then the star
     cy = (top + bottom) / 2 + 12
@@ -452,12 +613,15 @@ def draw_rear(c, pet, frame):
     starburst(c, cx, cy, 22, frame * 0.05)
 
 
-def draw(c, pet, frame):
+def draw(c, pet, frame, k=1.0):
+    """Draw her k times her normal size (display scaling times the break zoom)."""
     c.delete("all")
     st = pet.state
+    fur, dark, pink = pet.colours
     if st == "butt":
         draw_rear(c, pet, frame)
-        draw_bubble(c, pet, GROUND - 120)
+        zoom_canvas(c, k)
+        draw_bubble(c, pet, GROUND - 120, k)
         return
 
     f = 1 if pet.dir >= 0 else -1
@@ -496,16 +660,16 @@ def draw(c, pet, frame):
     sway = math.sin(t * (0.6 if lie else 1.4)) * (4 if lie else 11)
     line([(58, by + 6), (36, by - 14 + sway), (34, by - 44 + sway)] if in_cart else
          [(58 + bx, by + 6), (34 + bx, by - 4 + sway), (28 + bx, by - 26 + sway)],
-         width=9, fill=FUR, capstyle="round", smooth=True)
+         width=9, fill=fur, capstyle="round", smooth=True)
 
     # wheels, drawn behind the body so the haunch overlaps their inner edge
     if pet.cart:
         for cx, cy, r, tire in ((ax + 13, ay - 9, WHEEL_R - 4, "#2b2b30"),   # far wheel
                                 (ax, ay, WHEEL_R, TIRE)):                    # near wheel
-            oval(cx - r, cy - r, cx + r, cy + r, fill=tire, outline="")
+            oval(cx - r, cy - r, cx + r, cy + r, fill=tire, outline="", tags=("wheel",))
             oval(cx - r + 5, cy - r + 5, cx + r - 5, cy + r - 5, fill=RIM, outline="")
-            for k in range(3):
-                a = pet.roll / WHEEL_R + k * math.pi / 3
+            for i in range(3):
+                a = pet.roll / WHEEL_R + i * math.pi / 3
                 dx, dy = math.cos(a) * (r - 6), math.sin(a) * (r - 6)
                 line([(cx - dx, cy - dy), (cx + dx, cy + dy)], width=2, fill=FRAME)
             oval(cx - 4, cy - 4, cx + 4, cy + 4, fill=FRAME, outline="")
@@ -513,17 +677,18 @@ def draw(c, pet, frame):
 
     # bowl of milk, set down right under her nose
     if st == "milk":
-        oval(130, GROUND - 18, 176, GROUND - 2, fill=BOWL, outline=FRAME, width=2)
-        oval(135, GROUND - 16, 171, GROUND - 8, fill=MILK, outline="")
+        x1, y1, x2, y2 = bowl_box(1)           # oval() mirrors it when she faces left
+        oval(x1, y1, x2, y2, fill=BOWL, outline=FRAME, width=2, tags=("bowl",))
+        oval(x1 + 5, y1 + 2, x2 - 5, y2 - 6, fill=MILK, outline="", tags=("bowl",))
 
     # a tuft of grass to chew on, and the hairball it leads to
     if st == "grass":
         for gx, gh, bend in ((132, 30, 7), (141, 42, -6), (150, 36, 9), (159, 26, -5)):
             line([(gx, GROUND - 2), (gx + bend, GROUND - gh)],
-                 width=4, fill=GRASS, capstyle="round", smooth=True)
+                 width=4, fill=GRASS, capstyle="round", smooth=True, tags=("grass",))
     elif st == "hairball" and pet.progress > 0.6:
-        oval(158, GROUND - 13, 186, GROUND - 2, fill=DARK, outline="")
-        oval(163, GROUND - 14, 179, GROUND - 6, fill=FUR, outline="")
+        oval(158, GROUND - 13, 186, GROUND - 2, fill=dark, outline="", tags=("hairball",))
+        oval(163, GROUND - 14, 179, GROUND - 6, fill=fur, outline="", tags=("hairball",))
 
     # legs (front pair sits wide apart so they don't collapse into one stub)
     if not lie:
@@ -532,19 +697,21 @@ def draw(c, pet, frame):
             if i < 2:                                           # rear pair
                 if in_cart:                                     # slung, never reaches the floor
                     line([(lx - 4, by + 12), (lx - 20, ay - 2)],
-                         width=9, fill=DARK, capstyle="round")
+                         width=9, fill=dark, capstyle="round", tags=("leg",))
                     continue
                 if sit:
                     continue                                    # folded under when sitting
             if i == 3 and st in ("lick", "highfive", "pause"):
                 continue                                        # raised paw, drawn over the body
             tipx, tipy = lx + (sw * ph if st == "walk" else 0), GROUND
-            line([(lx, by + 14), (tipx, tipy)], width=10, fill=DARK, capstyle="round")
+            line([(lx, by + 14), (tipx, tipy)], width=10, fill=dark, capstyle="round",
+                 tags=("leg",))
 
     # body + stripes
-    oval(55 + bx - puff, by - 24 - puff, 136 + bx + puff, by + 22 + puff, fill=FUR, outline="")
+    oval(55 + bx - puff, by - 24 - puff, 136 + bx + puff, by + 22 + puff, fill=fur, outline="",
+         tags=("body",))
     for sx in (80, 96, 112):
-        line([(sx + bx, by - 21), (sx - 7 + bx, by - 4)], width=4, fill=DARK, capstyle="round")
+        line([(sx + bx, by - 21), (sx - 7 + bx, by - 4)], width=4, fill=dark, capstyle="round")
 
     # cart frame, drawn over the body: upright at the hips, rail along the back, chest strap
     if pet.cart:
@@ -555,52 +722,55 @@ def draw(c, pet, frame):
 
     # the paw she holds out to you (high five, and while the sign is up), in front of her chest
     if st in ("highfive", "pause"):
-        line([(124, by + 12), (166, by - 2)], width=10, fill=DARK, capstyle="round")
-        oval(158, by - 11, 178, by + 7, fill=DARK, outline="")
-        oval(165, by - 6, 172, by + 1, fill=PINK, outline="")              # toe bean
+        line([(124, by + 12), (166, by - 2)], width=10, fill=dark, capstyle="round",
+             tags=("paw",))
+        oval(158, by - 11, 178, by + 7, fill=dark, outline="", tags=("paw",))
+        oval(165, by - 6, 172, by + 1, fill=pink, outline="", tags=("paw",))   # toe bean
 
     # ears, head
-    poly([(hx - 21, hy - 12), (hx - 25, hy - 36), (hx - 5, hy - 22)], fill=FUR, outline="")
-    poly([(hx + 13, hy - 20), (hx + 20, hy - 38), (hx + 26, hy - 15)], fill=FUR, outline="")
-    oval(hx - 24, hy - 22, hx + 24, hy + 22, fill=FUR, outline="")
+    poly([(hx - 21, hy - 12), (hx - 25, hy - 36), (hx - 5, hy - 22)], fill=fur, outline="")
+    poly([(hx + 13, hy - 20), (hx + 20, hy - 38), (hx + 26, hy - 15)], fill=fur, outline="")
+    oval(hx - 24, hy - 22, hx + 24, hy + 22, fill=fur, outline="", tags=("head",))
 
     # eyes (shut when she naps, and when she grooms, like the real thing)
     ey = hy - 2
     if napping or st == "lick":
         for ex in (hx - 9, hx + 9):
             line([(ex - 6, ey), (ex, ey + 4), (ex + 6, ey)],
-                 width=2, fill=EYE, smooth=True, capstyle="round")
+                 width=2, fill=EYE, smooth=True, capstyle="round", tags=("eyes_shut",))
     else:
         blink = frame % 90 < 4
         for ex in (hx - 9, hx + 9):
             if blink:
                 line([(ex - 6, ey), (ex + 6, ey)], width=2, fill=EYE, capstyle="round")
             else:
-                oval(ex - 5, ey - 7, ex + 5, ey + 7, fill=EYE, outline="")
+                oval(ex - 5, ey - 7, ex + 5, ey + 7, fill=EYE, outline="", tags=("eyes_open",))
                 oval(ex - 3, ey - 6, ex, ey - 3, fill="white", outline="")
 
     # nose, mouth, whiskers
-    poly([(hx + 1, ey + 10), (hx + 11, ey + 10), (hx + 6, ey + 16)], fill=PINK, outline="")
+    poly([(hx + 1, ey + 10), (hx + 11, ey + 10), (hx + 6, ey + 16)], fill=pink, outline="")
     if st in ("meow", "hairball"):
-        oval(hx + 1, ey + 15, hx + 13, ey + 26, fill=MOUTH, outline="")
-        oval(hx + 4, ey + 21, hx + 11, ey + 26, fill=PINK, outline="")
+        oval(hx + 1, ey + 15, hx + 13, ey + 26, fill=MOUTH, outline="", tags=("mouth",))
+        oval(hx + 4, ey + 21, hx + 11, ey + 26, fill=pink, outline="")
     elif st in ("lick", "milk", "grass"):
-        oval(hx + 2, ey + 14, hx + 13, ey + 23, fill=PINK, outline="")      # tongue out
+        oval(hx + 2, ey + 14, hx + 13, ey + 23, fill=pink, outline="", tags=("tongue",))
     for wy in (ey + 8, ey + 14):
-        line([(hx + 13, wy), (hx + 32, wy - 3)], width=1, fill=DARK)
+        line([(hx + 13, wy), (hx + 32, wy - 3)], width=1, fill=dark)
 
     # the paw she's grooming, drawn last so it sits over her muzzle instead of behind it
     if st == "lick":
-        line([(126, by + 14), (hx + 7, ey + 17)], width=10, fill=DARK, capstyle="round")
-        oval(hx - 1, ey + 9, hx + 17, ey + 25, fill=DARK, outline="")
-        oval(hx + 3, ey + 12, hx + 9, ey + 17, fill=PINK, outline="")       # toe bean
+        line([(126, by + 14), (hx + 7, ey + 17)], width=10, fill=dark, capstyle="round")
+        oval(hx - 1, ey + 9, hx + 17, ey + 25, fill=dark, outline="")
+        oval(hx + 3, ey + 12, hx + 9, ey + 17, fill=pink, outline="")       # toe bean
 
-    if napping:
+    zoom_canvas(c, k)
+    if napping:                                # text goes on after the zoom, at final size
         for i, s in enumerate("zZz"):
-            c.create_text(fx(hx + 20 + i * 13), hy - 32 - i * 13 - (frame // 6) % 7,
-                          text=s, fill="#7fb2e0", font=("Segoe UI", 9 + i * 3, "bold"))
+            c.create_text(fx(hx + 20 + i * 13) * k, (hy - 32 - i * 13 - (frame // 6) % 7) * k,
+                          text=s, fill="#7fb2e0", font=(FONT, -round((12 + i * 4) * k), "bold"),
+                          tags=("zzz",))
 
-    draw_bubble(c, pet, hy)
+    draw_bubble(c, pet, hy, k)
 
 
 def zoom_canvas(c, k):
@@ -616,65 +786,117 @@ def zoom_canvas(c, k):
 
 
 def draw_sign(c, cw, k, pet, now):
-    """The sign she holds up during a break, drawn at final size after the zoom."""
+    """The sign she holds up during a break, drawn at final size after the zoom.
+    k is her whole zoom (display scaling times the break zoom)."""
     end = pet.kind == "end"
+    title, sub = STRINGS["sign_end" if end else "sign_break"]
     seconds_left = pet.pause_left(now)
     s = k / PAUSE_ZOOM                         # grows with her instead of popping in full size
+
+    def font(px, *style):
+        return (FONT, -max(8, round(px * s))) + style
+
     cx, top = cw / 2, 16 * s
     c.create_rectangle(cx - 140 * s, top, cx + 140 * s, top + 200 * s,
-                       fill="white", outline=STRAP, width=6 * s)
-    c.create_text(cx, top + 34 * s, text="ŠICHTA KONČÍ" if end else "STOP", fill=STRAP,
-                  font=("Segoe UI", max(8, int((19 if end else 26) * s)), "bold"))
-    c.create_text(cx, top + 68 * s, text="hotovo. zavři to" if end else "teď pauzička",
-                  fill=INK, font=("Segoe UI", max(6, int(14 * s)), "bold"))
-    c.create_text(cx, top + 104 * s, text="%d s  ·  %s" % (seconds_left, pet.breath_word),
-                  fill=MUTED, font=("Segoe UI", max(6, int(19 * s)), "bold"))
+                       fill="white", outline=STRAP, width=6 * s, tags=("sign",))
+    c.create_text(cx, top + 34 * s, text=title, fill=STRAP,
+                  font=font(25 if end else 35, "bold"), tags=("sign",))
+    c.create_text(cx, top + 68 * s, text=sub, fill=INK, font=font(19, "bold"), tags=("sign",))
+    c.create_text(cx, top + 104 * s, text=STRINGS["sign_count"] % (seconds_left, pet.breath_word),
+                  fill=MUTED, font=font(25, "bold"), tags=("sign",))
     c.create_line(cx - 108 * s, top + 130 * s, cx + 108 * s, top + 130 * s,
-                  fill="#e4ded4", width=2 * s)
+                  fill="#e4ded4", width=2 * s, tags=("sign",))
     c.create_text(cx, top + 164 * s, text=pet.coach_line(now), fill=INK, width=248 * s,
-                  justify="center", font=("Segoe UI", max(6, int(12 * s))))
+                  justify="center", font=font(16), tags=("sign",))
 
 
 # --------------------------------------------------------------------------- her memory
 
-def set_fur(palette: str) -> None:
-    global FUR, DARK, PINK
-    FUR, DARK, PINK = PALETTES.get(palette, PALETTES["zrzava"])
+def config_dir(platform: str = sys.platform, env=None, home: Path | None = None) -> Path:
+    """Where she keeps her memory: the usual per-user config folder for each system."""
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else Path(home)
+    if platform.startswith("win"):
+        base = env.get("APPDATA")
+        return (Path(base) if base else home / "AppData" / "Roaming") / "kocicka"
+    if platform == "darwin":
+        return home / "Library" / "Application Support" / "kocicka"
+    base = env.get("XDG_CONFIG_HOME")
+    # the XDG spec says to ignore a relative path here
+    return (Path(base) if base and base.startswith("/") else home / ".config") / "kocicka"
 
 
-def load_config(path: Path = CONFIG) -> dict:
+LEGACY_CONFIG = Path(__file__).with_name("kocka.json")   # where versions before 2026-10 kept it
+
+
+def _read_json(path: Path) -> dict | None:
     try:
         cfg = json.loads(path.read_text(encoding="utf-8"))
-        return cfg if isinstance(cfg, dict) else {}
     except (OSError, ValueError):
-        return {}                              # missing or corrupt: she just asks again
+        return None                            # missing or corrupt
+    return cfg if isinstance(cfg, dict) else None
 
 
-def save_config(cfg: dict, path: Path = CONFIG) -> None:
-    try:
-        path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
-        pass                                   # read-only folder: she forgets, but still runs
+class Store:
+    """Her memory on disk. Writes go to a temp file that then replaces the real one, so a
+    crash mid-write never leaves half a file; the previous version stays as .bak."""
+
+    def __init__(self, path: Path | None = None, legacy: Path | None = LEGACY_CONFIG):
+        self.path = Path(path) if path else config_dir() / "kocka.json"
+        self.backup = self.path.with_name(self.path.name + ".bak")
+        self.legacy = legacy
+
+    def load(self) -> dict:
+        for candidate in (self.path, self.backup):
+            cfg = _read_json(candidate)
+            if cfg is not None:
+                return cfg
+        if self.legacy and self.legacy != self.path:
+            cfg = _read_json(self.legacy)
+            if cfg is not None:                # an older version kept it next to the script
+                self.save(cfg)                 # copy it over; the old file is left alone
+                return cfg
+        return {}                              # nothing readable: she just asks again
+
+    def save(self, cfg: dict) -> bool:
+        """True if it reached the disk. A read-only folder is not an error: she runs on."""
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(cfg, ensure_ascii=False, indent=2))
+                fh.flush()
+                os.fsync(fh.fileno())
+            if self.path.exists():
+                shutil.copy2(self.path, self.backup)
+            os.replace(tmp, self.path)
+            return True
+        except OSError:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+            return False
 
 
 def czech_days(n: int) -> str:
-    return "%d %s" % (n, "den" if n == 1 else "dny" if n < 5 else "dní")
+    one, few, many = STRINGS["days"]
+    return "%d %s" % (n, one if n == 1 else few if n < 5 else many)
 
 
 def greeting(cfg: dict, today: str) -> str:
     """Day one she introduces herself; after that she picks up where she left off."""
-    name = cfg.get("name") or FALLBACK_NAME
+    name = cfg.get("name") or STRINGS["fallback_name"]
+    hello = STRINGS["hello"] % name
     first, last = cfg.get("first_seen"), cfg.get("last_seen")
     if not first or first == today:
-        return "ahoj, jsem %s" % name
+        return hello
     try:
         days = (date.fromisoformat(today) - date.fromisoformat(first)).days + 1
         gap = (date.fromisoformat(today) - date.fromisoformat(last)).days if last else 0
     except (TypeError, ValueError):
-        return "ahoj, jsem %s" % name          # dates she can't read: just say hello
+        return hello                           # dates she can't read: just say hello
     if gap >= 2:
-        return "chyběla jsi mi! %s jsme se neviděly" % czech_days(gap)
-    return "zase já. jsme spolu %d. den" % days
+        return STRINGS["missed_you"] % czech_days(gap)
+    return STRINGS["day_n"] % days
 
 
 def water_line(cfg: dict, today: str, hour: int) -> str | None:
@@ -687,93 +909,329 @@ def water_line(cfg: dict, today: str, hour: int) -> str | None:
     if hour < 14 or drunk >= WATER_GOAL:
         return None
     if drunk == 0:
-        return "dneska ses ještě nenapila. ani jednou. koukám"
-    return "dneska jsme to daly %d×. na kočku dobrý, na člověka málo" % drunk
+        return STRINGS["water_none"]
+    return STRINGS["water_some"] % drunk
+
+
+# --------------------------------------------------------------------------- the app, minus Tk
+
+_BUSY = ("walk", "pause", "hairball")   # states that move enough to need every frame
+
+
+class Companion:
+    """Everything the window decides, without the window: the day, her memory, clicks,
+    the menu, when to hide, when to redraw, where to stand. run() is only Tk glue around
+    this, so all of it can be tested without a display."""
+
+    def __init__(self, cfg: dict, store: Store, pet: Pet, today: str,
+                 now: float, scale: float = 1.0):
+        self.cfg, self.store, self.pet = cfg, store, pet
+        self.today = today
+        self.scale = scale
+        self.t0 = now            # animation clock, so frames advance with time, not ticks
+        self.away = False
+        self.hidden = False
+        self.asking = False      # the "one thing" question is on screen
+        self.day_start = pet.total
+        self.end_not_before = 0.0
+        self.last_slow = -1e18
+        self.last_key = None
+        self.warned = False
+        self.drag_from, self.dragged = None, 0.0
+        self.area = (0, 0, int(pet.screen_w * scale), H)
+
+    # memory
+    def save(self, now: float) -> bool:
+        ok = self.store.save(self.cfg)
+        if not ok and not self.warned:         # tell you once, then stop going on about it
+            self.warned = True
+            self.pet.speak(STRINGS["cant_save"], now, 9)
+        return ok
+
+    # the day
+    def worked_today(self) -> float:
+        return self.pet.total - self.day_start
+
+    def new_day(self, today: str, now: float) -> None:
+        """Past midnight: yesterday's one thing is yesterday's, and she'll ask again."""
+        self.today = today
+        self.day_start = self.pet.total
+        self.end_not_before = 0.0
+        self.cfg["last_seen"] = today
+        self.save(now)
+
+    def focus(self) -> dict:
+        """Today's one thing, or {} if she hasn't asked yet today."""
+        f = self.cfg.get("focus")
+        return f if isinstance(f, dict) and f.get("date") == self.today else {}
+
+    def focus_label(self) -> str:
+        f = self.focus()
+        if not f.get("text"):
+            return STRINGS["focus_none"]
+        return (STRINGS["focus_done"] if f.get("done") else STRINGS["focus_today"]) + f["text"]
+
+    def wants_focus(self, hour: int) -> bool:
+        return (not self.focus() and not self.asking and 6 <= hour < WORK_END
+                and not self.pet.asleep(hour) and not self.away and not self.hidden
+                and self.pet.state != "pause")
+
+    def set_focus(self, text: str | None, now: float) -> None:
+        """An empty or cancelled answer is a fine answer; she won't ask again today."""
+        self.asking = False
+        self.cfg["focus"] = {"date": self.today, "text": (text or "").strip()[:60],
+                             "done": False}
+        self.save(now)
+
+    def toggle_focus(self, now: float) -> bool:
+        f = self.focus()
+        if not f.get("text"):
+            return False
+        f["done"] = not f.get("done")
+        self.cfg["focus"] = f
+        self.save(now)
+        self.pet.speak(STRINGS["focus_proud" if f["done"] else "focus_undo"], now, 5)
+        return True
+
+    def drank(self, now: float) -> None:
+        w = self.cfg.get("water")
+        if not isinstance(w, dict) or w.get("date") != self.today:
+            w = {"date": self.today, "count": 0}
+        w["count"] = (w.get("count") if isinstance(w.get("count"), int) else 0) + 1
+        self.cfg["water"] = w
+        self.save(now)
+        left = WATER_GOAL - w["count"]
+        self.pet.speak(STRINGS["water_count"] % (w["count"], left) if left > 0
+                       else STRINGS["water_done"] % w["count"], now, 5)
+
+    def set_cart(self, on: bool, now: float) -> None:
+        self.pet.cart = on
+        if on and self.pet.state == "sit":
+            self.pet.do("idle", now, 2)
+        self.cfg["cart"] = on
+        self.save(now)
+
+    def rename(self, chosen: dict | None, now: float) -> bool:
+        if not chosen:                         # closed with X: nothing changes
+            return False
+        self.cfg.update(chosen)
+        self.pet.fur = self.cfg.get("fur", DEFAULT_FUR)
+        self.save(now)
+        self.pet.speak(STRINGS["renamed"] % self.cfg["name"], now, 5)
+        return True
+
+    # breaks
+    def end_due(self, now: float, hour: int) -> bool:
+        """The end-of-day sign, once, after real work today, never into an empty room."""
+        return (self.cfg.get("ended") != self.today and hour >= WORK_END
+                and not self.pet.asleep(hour) and not self.away and not self.hidden
+                and self.pet.state != "pause" and now >= self.end_not_before
+                and self.worked_today() >= END_AFTER_WORK)
+
+    def skip(self, now: float) -> None:
+        """Skip this break: put the sign down now, or skip the one that is coming."""
+        p = self.pet
+        if p.state == "pause":
+            p.finish_pause(now)
+        else:
+            p.worked = 0.0
+        p.speak(STRINGS["skipped"], now, 4)
+
+    def snooze(self, now: float) -> None:
+        """Ten more minutes, then the sign comes back."""
+        p = self.pet
+        if p.state == "pause" and p.kind == "end":
+            p.finish_pause(now, lie_down=False)
+            self.cfg.pop("ended", None)
+            self.end_not_before = now + SNOOZE
+            self.save(now)
+        elif p.state == "pause":
+            p.finish_pause(now)
+            p.worked = PAUSE_EVERY - SNOOZE
+        else:
+            p.worked = min(p.worked, PAUSE_EVERY - SNOOZE)
+        p.speak(STRINGS["snoozed"], now, 4)
+
+    # the mouse
+    def press(self, x_root: float) -> None:
+        self.drag_from, self.dragged = x_root, 0.0
+
+    def drag(self, x_root: float) -> None:
+        if self.drag_from is None:
+            return
+        d = x_root - self.drag_from
+        self.dragged += abs(d)
+        self.pet.x = min(self.pet.max_x, max(0, self.pet.x + d / self.scale))
+        self.drag_from = x_root
+
+    def release(self, x: float, y: float, now: float) -> str:
+        """A click (not a drag) at canvas pixel x, y. Returns what it did."""
+        dragged, self.drag_from = self.dragged, None
+        if dragged >= 5:
+            return "drag"
+        p = self.pet
+        if p.state == "pause":
+            if p.kind == "end":                # the end-of-day sign goes when you say so
+                p.finish_pause(now)
+                return "dismissed"
+            return "held"                      # the hourly one runs out (or use the menu)
+        ux, uy = x / self.scale, y / self.scale
+        x1, y1, x2, y2 = bowl_box(p.dir)
+        if p.state == "milk" and x1 - 4 <= ux <= x2 + 4 and y1 - 4 <= uy <= y2 + 4:
+            self.drank(now)                    # you clinked her bowl, so you drank too
+            return "drank"
+        p.do("highfive", now, 3)
+        p.chatter(now)
+        return "highfive"
+
+    # time
+    def needs_slow(self, now: float) -> bool:
+        return now - self.last_slow >= SLOW_EVERY
+
+    def slow(self, now: float, hour: int, today: str, idle: float, fullscreen: bool,
+             area: tuple | None = None) -> bool:
+        """The once-a-second checks. Returns True when she should show or hide."""
+        self.last_slow = now
+        self.away = idle > AWAY_AFTER
+        if today != self.today:                # she ran past midnight
+            self.new_day(today, now)
+        if area:
+            self.area = area
+            self.pet.screen_w = (area[2] - area[0]) / self.scale
+            self.pet.x = min(self.pet.x, self.pet.max_x)
+        self.pet.extra = [w for w in (water_line(self.cfg, today, hour),) if w]
+        changed = fullscreen != self.hidden
+        self.hidden = fullscreen
+        if self.end_due(now, hour):
+            self.cfg["ended"] = self.today
+            self.save(now)
+            self.pet.start_pause(now, "end")
+        return changed
+
+    def frame(self, now: float) -> int:
+        """Animation frame. Counted from time, so a slower tick doesn't slow her down;
+        coarser while she naps, since nothing on her moves fast then."""
+        n = int((now - self.t0) * 1000 // TICK)
+        if self.pet.state in ("sleep", "away"):
+            return n - n % 6
+        return n if self.pet.state in _BUSY or self.drag_from is not None else n - n % 2
+
+    def tick_ms(self) -> int:
+        if self.hidden:
+            return TICK_HIDDEN
+        if self.drag_from is not None or self.pet.state in _BUSY:
+            return TICK
+        return TICK_SLEEP if self.pet.state in ("sleep", "away") else TICK * 2
+
+    def advance(self, now: float, hour: int) -> bool:
+        """Step her on. True when what you'd see changed, so it's worth a redraw."""
+        p = self.pet
+        p.step(now, hour, self.away, self.hidden)
+        if self.hidden:
+            return False
+        key = (self.frame(now), p.state, p.dir, p.cart, p.fur, round(p.x, 1), round(p.roll, 1),
+               p.say, round(p.zoom(now), 3), p.pause_left(now) if p.state == "pause" else 0,
+               p.breath_word, round(p.breath, 2), p.coach_line(now), round(p.progress, 1),
+               self.area, self.scale)
+        if key == self.last_key:
+            return False
+        self.last_key = key
+        return True
+
+    def layout(self, now: float) -> tuple:
+        """(k, extra, width, height, x, y): her zoom, sign headroom and window geometry,
+        standing on the bottom of the work area and growing around her, not off to a side."""
+        k = self.pet.zoom(now) * self.scale
+        extra = PAUSE_EXTRA if self.pet.state == "pause" else 0
+        cw, ch = int(W * k), int((H + extra) * k)
+        left, _, right, bottom = self.area
+        x = left + int(self.pet.x * self.scale - (cw - W * self.scale) / 2)
+        x = min(max(left, x), max(left, right - cw))
+        return k, extra, cw, ch, x, bottom - ch
 
 
 # --------------------------------------------------------------------------- windows
 
-def welcome(root, cfg=None):
-    """Pick a colour and a name, with her rolling along live underneath. Returns the config."""
+def welcome(root, cfg=None, scale=1.0):
+    """Pick a colour and a name, with her rolling along live underneath. Returns the
+    choice, or None if the window was closed with X (nothing changes then)."""
     import tkinter as tk
 
     cfg = dict(cfg or {})
-    chosen = {"name": cfg.get("name", ""), "fur": cfg.get("fur", "zrzava"),
+    chosen = {"name": cfg.get("name", ""), "fur": cfg.get("fur", DEFAULT_FUR),
               "cart": cfg.get("cart", True)}
+    result = {}
     win = tk.Toplevel(root)
-    win.title("Vítej!")
+    win.title(STRINGS["welcome_title"])
     win.resizable(False, False)
     win.configure(bg=PAPER)
 
-    tk.Label(win, text="Máš novou kočku.", bg=PAPER, fg=INK,
-             font=("Segoe UI", 15, "bold")).pack(pady=(18, 0))
-    tk.Label(win, text="Vyber jí barvu a dej jí jméno.", bg=PAPER, fg=MUTED,
-             font=("Segoe UI", 10)).pack(pady=(2, 4))
+    tk.Label(win, text=STRINGS["welcome_head"], bg=PAPER, fg=INK,
+             font=(FONT, 15, "bold")).pack(pady=(18, 0))
+    tk.Label(win, text=STRINGS["welcome_sub"], bg=PAPER, fg=MUTED,
+             font=(FONT, 10)).pack(pady=(2, 4))
 
-    preview = tk.Canvas(win, width=W, height=H, bg=PAPER, highlightthickness=0)
+    preview = tk.Canvas(win, width=int(W * scale), height=int(H * scale), bg=PAPER,
+                        highlightthickness=0)
     preview.pack()
-    demo = Pet(1000)
-    demo.state = "walk"
+    demo = Pet(1000)                           # her own little stand-in: the real cat
+    demo.state, demo.cart = "walk", chosen["cart"]   # doesn't change until you say so
+    fur_var = tk.StringVar(value=chosen["fur"])
     anim = {"frame": 0}
 
     def spin():
         if not win.winfo_exists():
             return
         demo.roll += SPEED
+        demo.fur = fur_var.get()
         anim["frame"] += 1
-        draw(preview, demo, anim["frame"])
+        draw(preview, demo, anim["frame"], scale)
         win.after(TICK, spin)
 
-    fur_var = tk.StringVar(value=chosen["fur"])
     row = tk.Frame(win, bg=PAPER)
     row.pack(pady=(0, 10))
-    for key, label in PALETTE_LABELS:
+    for key, label in STRINGS["fur_labels"]:
         tk.Radiobutton(row, text=label, value=key, variable=fur_var, bg=PAPER, fg=INK,
-                       activebackground=PAPER, selectcolor="white", font=("Segoe UI", 10),
-                       command=lambda: set_fur(fur_var.get())).pack(side="left", padx=4)
+                       activebackground=PAPER, selectcolor="white",
+                       font=(FONT, 10)).pack(side="left", padx=4)
 
-    tk.Label(win, text="Jak se bude jmenovat?", bg=PAPER, fg=INK,
-             font=("Segoe UI", 10)).pack()
-    entry = tk.Entry(win, font=("Segoe UI", 12), justify="center", width=18)
+    tk.Label(win, text=STRINGS["welcome_name"], bg=PAPER, fg=INK, font=(FONT, 10)).pack()
+    entry = tk.Entry(win, font=(FONT, 12), justify="center", width=18)
     entry.insert(0, chosen["name"])
     entry.pack(pady=(4, 12))
     entry.focus_set()
 
     def done(*_):
-        chosen["name"] = entry.get().strip()[:14] or FALLBACK_NAME
+        chosen["name"] = entry.get().strip()[:14] or STRINGS["fallback_name"]
         chosen["fur"] = fur_var.get()
+        result.update(chosen)
         win.destroy()
 
-    tk.Button(win, text="Pojď ke mně!", font=("Segoe UI", 11, "bold"), bg="#e8a75c",
+    tk.Button(win, text=STRINGS["welcome_go"], font=(FONT, 11, "bold"), bg="#e8a75c",
               activebackground="#d99546", relief="flat", padx=18, pady=6,
               command=done).pack(pady=(0, 18))
     win.bind("<Return>", done)
-    win.protocol("WM_DELETE_WINDOW", done)
+    win.protocol("WM_DELETE_WINDOW", win.destroy)   # X means cancel
 
-    set_fur(chosen["fur"])
     spin()
     win.update_idletasks()
     win.geometry("+%d+%d" % ((win.winfo_screenwidth() - win.winfo_width()) // 2,
                              (win.winfo_screenheight() - win.winfo_height()) // 3))
     win.grab_set()
     root.wait_window(win)
-    set_fur(chosen["fur"])
-    return chosen
+    return result or None
 
 
-def ask_focus(root, today, hour):
+def ask_focus(root):
     """Once a day she asks for the one thing that matters. Empty answer is a fine answer."""
-    if not 6 <= hour < WORK_END:
-        return None                            # too late to promise anything
     from tkinter import simpledialog
-    got = simpledialog.askstring(
-        "Jedna věc", "Co je dneska ta jedna věc, kterou chceš mít hotovou?", parent=root)
-    return {"date": today, "text": (got or "").strip()[:60], "done": False}
+    return simpledialog.askstring(STRINGS["focus_title"], STRINGS["focus_ask"], parent=root)
 
 
-def run():
+def run(argv=()):
     import tkinter as tk
 
+    set_dpi_awareness()                        # before the first window, or it's too late
     root = tk.Tk()
     root.overrideredirect(True)
     root.attributes("-topmost", True)
@@ -783,174 +1241,110 @@ def run():
     except tk.TclError:
         backdrop = PAPER                       # no colour keying here: a soft card, not hot pink
     root.configure(bg=backdrop)
+    scale = min(4.0, max(1.0, root.winfo_fpixels("1i") / 96.0))
 
     root.withdraw()                            # ask before she shows up, not over her
-    cfg = load_config()
-    if not cfg.get("name"):                    # only ever asked once, on the very first run
-        cfg = welcome(root, cfg)
-    set_fur(cfg.get("fur", "zrzava"))
+    store = Store()
+    cfg = store.load()
+    if not cfg.get("name"):                    # asked on the very first run, until answered
+        cfg.update(welcome(root, cfg, scale) or {})
 
-    day = {"date": date.today().isoformat()}
-    hello = greeting(cfg, day["date"])
-    cfg.setdefault("first_seen", day["date"])
-    cfg["last_seen"] = day["date"]
-    if (cfg.get("focus") or {}).get("date") != day["date"]:
-        asked = ask_focus(root, day["date"], datetime.now().hour)
-        if asked:
-            cfg["focus"] = asked
-    save_config(cfg)
+    now, today = time.time(), date.today().isoformat()
+    hello = greeting(cfg, today)
+    cfg.setdefault("first_seen", today)
+    cfg["last_seen"] = today
+    area = work_area(root.winfo_screenwidth(), root.winfo_screenheight())
+    pet = Pet((area[2] - area[0]) / scale)
+    pet.cart, pet.fur = cfg.get("cart", True), cfg.get("fur", DEFAULT_FUR)
+    pet.speak(hello, now, 6)
+    app = Companion(cfg, store, pet, today, now, scale)
+    app.area = area
+    if app.wants_focus(datetime.now().hour):
+        app.asking = True
+        app.set_focus(ask_focus(root), time.time())
+    else:
+        app.save(now)
     root.deiconify()
 
-    pet = Pet(root.winfo_screenwidth())
-    pet.cart = cfg.get("cart", True)
-    pet.speak(hello, time.time(), 6)
-    if "--demo" in sys.argv:                   # so you don't have to wait an hour to see it
+    if "--demo" in argv:                       # so you don't have to wait an hour to see it
         pet.next_line, pet.worked = time.time() + 3, PAUSE_EVERY - 12
     c = tk.Canvas(root, width=W, height=H, bg=backdrop, highlightthickness=0)
     c.pack()
-    ui = {"frame": 0, "drag": None, "moved": 0, "away": False, "hidden": False}
-
-    def focus_label():
-        f = cfg.get("focus") or {}
-        if not f.get("text"):
-            return "dnes: (nic)"
-        return ("hotovo: " if f.get("done") else "dnes: ") + f["text"]
-
-    def toggle_focus():
-        f = cfg.get("focus") or {}
-        if not f.get("text"):
-            return
-        f["done"] = not f.get("done")
-        cfg["focus"] = f
-        save_config(cfg)
-        menu.entryconfigure(focus_at, label=focus_label())
-        pet.speak("jsem na tebe pyšná" if f["done"] else "tak jo, jedem dál", time.time(), 5)
-
-    def drank():
-        w = cfg.get("water")
-        if not isinstance(w, dict) or w.get("date") != day["date"]:
-            w = {"date": day["date"], "count": 0}
-        w["count"] = (w.get("count") if isinstance(w.get("count"), int) else 0) + 1
-        cfg["water"] = w
-        save_config(cfg)
-        left = WATER_GOAL - w["count"]
-        pet.speak("%d. dneska. ještě %d" % (w["count"], left) if left > 0
-                  else "%d. a to je ono" % w["count"], time.time(), 5)
-
-    def press(e):
-        ui["drag"], ui["moved"] = e.x_root, 0
-
-    def motion(e):
-        if ui["drag"] is None:
-            return
-        d = e.x_root - ui["drag"]
-        ui["moved"] += abs(d)
-        pet.x = min(pet.max_x, max(0, pet.x + d))
-        ui["drag"] = e.x_root
-
-    def release(e):
-        if ui["moved"] >= 5 or pet.state == "pause":
-            ui["drag"] = None
-            return                             # that was a drag, or she's holding the sign
-        now = time.time()
-        if pet.state == "milk" and 130 <= e.x <= 176 and e.y >= GROUND - 20:
-            drank()                            # you clinked her bowl, so you drank too
-        else:
-            pet.do("highfive", now, 3)
-            pet.speak(random.choice(LINES + pet.extra), now, 7)
-        ui["drag"] = None
-
-    cart_var = tk.BooleanVar(value=pet.cart)
-
-    def toggle_cart():
-        pet.cart = cart_var.get()
-        if pet.cart and pet.state == "sit":
-            pet.do("idle", time.time(), 2)
-        cfg["cart"] = pet.cart
-        save_config(cfg)
-
-    def rename():
-        cfg.update(welcome(root, cfg))
-        save_config(cfg)
-        menu.entryconfigure(0, label=cfg["name"])
-        pet.speak("teď jsem %s" % cfg["name"], time.time(), 5)
+    shown = {"geometry": "", "extra": 0}       # what is on screen; extra = how far the sign
+                                               # pushed her down, so clicks still line up
 
     menu = tk.Menu(root, tearoff=0)
-    menu.add_command(label=cfg["name"], state="disabled")
-    menu.add_command(label=focus_label(), command=toggle_focus)
-    focus_at = 1
-    menu.add_separator()
-    menu.add_command(label="pojď sem", command=lambda: pet.do("walk", time.time(), 4))
-    menu.add_command(label="dej packu", command=lambda: pet.do("highfive", time.time(), 4))
-    menu.add_command(label="mlíčko", command=lambda: pet.do("milk", time.time()))
-    menu.add_command(label="napila jsem se", command=drank)
-    menu.add_command(label="řekni něco",
-                     command=lambda: pet.speak(random.choice(LINES + pet.extra),
-                                               time.time(), 7))
-    menu.add_command(label="dáme pauzu", command=lambda: pet.start_pause(time.time()))
-    menu.add_separator()
-    menu.add_checkbutton(label="vozíček", variable=cart_var, command=toggle_cart)
-    menu.add_command(label="přejmenovat / barva", command=rename)
-    menu.add_command(label="zavřít", command=root.destroy)
+    cart_var = tk.BooleanVar(value=pet.cart)
 
-    c.bind("<ButtonPress-1>", press)
-    c.bind("<B1-Motion>", motion)
-    c.bind("<ButtonRelease-1>", release)
+    def refresh_menu():
+        menu.entryconfigure(0, label=cfg.get("name") or STRINGS["fallback_name"])
+        menu.entryconfigure(1, label=app.focus_label())
+
+    def rename():
+        if app.rename(welcome(root, cfg, scale), time.time()):
+            refresh_menu()
+
+    def act(fn):
+        return lambda: fn(time.time())
+
+    menu.add_command(state="disabled")                                      # 0: her name
+    menu.add_command(command=lambda: app.toggle_focus(time.time()) and refresh_menu())  # 1
+    menu.add_separator()
+    menu.add_command(label=STRINGS["menu_come"], command=lambda: pet.do("walk", time.time(), 4))
+    menu.add_command(label=STRINGS["menu_paw"],
+                     command=lambda: pet.do("highfive", time.time(), 4))
+    menu.add_command(label=STRINGS["menu_milk"], command=lambda: pet.do("milk", time.time()))
+    menu.add_command(label=STRINGS["menu_drank"], command=act(app.drank))
+    menu.add_command(label=STRINGS["menu_say"], command=act(pet.chatter))
+    menu.add_separator()
+    menu.add_command(label=STRINGS["menu_break"], command=act(pet.start_pause))
+    menu.add_command(label=STRINGS["menu_skip"], command=act(app.skip))
+    menu.add_command(label=STRINGS["menu_snooze"], command=act(app.snooze))
+    menu.add_separator()
+    menu.add_checkbutton(label=STRINGS["menu_cart"], variable=cart_var,
+                         command=lambda: app.set_cart(cart_var.get(), time.time()))
+    menu.add_command(label=STRINGS["menu_rename"], command=rename)
+    menu.add_command(label=STRINGS["menu_close"], command=root.destroy)
+    refresh_menu()
+
     def open_menu(e):
+        refresh_menu()                         # the date may have changed under it
         menu.tk_popup(e.x_root, e.y_root)
 
+    c.bind("<ButtonPress-1>", lambda e: app.press(e.x_root))
+    c.bind("<B1-Motion>", lambda e: app.drag(e.x_root))
+    c.bind("<ButtonRelease-1>", lambda e: app.release(e.x, e.y - shown["extra"], time.time()))
     c.bind("<Button-3>", open_menu)
     if root.tk.call("tk", "windowingsystem") == "aqua":
         c.bind("<Button-2>", open_menu)        # macOS Tk reports the right button as 2
 
-    def slow_checks(now, hour):
-        """The expensive Windows questions, asked once a second instead of 25 times."""
-        ui["away"] = idle_seconds() > AWAY_AFTER
-        today = date.today().isoformat()
-        if today != day["date"]:               # she ran past midnight
-            day["date"] = today
-            cfg["last_seen"] = today
-            save_config(cfg)
-        pet.extra = [w for w in (water_line(cfg, today, hour),) if w]
-        if (cfg.get("ended") != today and hour >= WORK_END and not pet.asleep(hour)
-                and not ui["away"] and pet.state != "pause"):
-            cfg["ended"] = today
-            save_config(cfg)
-            pet.start_pause(now, "end")
-
-    def tick():
-        now = time.time()
-        hour = datetime.now().hour
-        if ui["frame"] % SLOW == 0:
-            slow_checks(now, hour)
-            hide = sharing_screen()            # a call or a slideshow: she gets out of the way
-            if hide != ui["hidden"]:
-                (root.withdraw if hide else root.deiconify)()
-                ui["hidden"] = hide
-        ui["frame"] += 1
-        if ui["hidden"]:
-            root.after(TICK * 5, tick)
-            return
-
-        pet.screen_w = root.winfo_screenwidth()   # survives docking / a resolution change
-        pet.x = min(pet.x, pet.max_x)
-        pet.step(now, hour, ui["away"])
-
-        k = pet.zoom(now)
-        extra = PAUSE_EXTRA if pet.state == "pause" else 0   # headroom for the sign
-        cw, ch = int(W * k), int((H + extra) * k)
+    def render(now):
+        k, extra, cw, ch, x, y = app.layout(now)
         c.config(width=cw, height=ch)
-        draw(c, pet, ui["frame"])
-        zoom_canvas(c, k)
+        draw(c, pet, app.frame(now), k)
+        shown["extra"] = int(extra * k)
         if extra:
             c.move("all", 0, extra * k)           # push her down, sign goes in above her
             draw_sign(c, cw, k, pet, now)
+        geometry = "%dx%d+%d+%d" % (cw, ch, x, y)
+        if geometry != shown["geometry"]:
+            root.geometry(geometry)
+            shown["geometry"] = geometry
 
-        wx = int(pet.x - (cw - W) / 2)            # grow around her, not off to one side
-        wx = min(max(0, wx), max(0, root.winfo_screenwidth() - cw))
-        top = root.winfo_screenheight() - TASKBAR - int((GROUND + extra) * k)
-        root.geometry("%dx%d+%d+%d" % (cw, ch, wx, top))
-        root.after(TICK, tick)
+    def tick():
+        now, hour = time.time(), datetime.now().hour
+        if app.needs_slow(now):
+            area = work_area(root.winfo_screenwidth(), root.winfo_screenheight())
+            if app.slow(now, hour, date.today().isoformat(), idle_seconds(),
+                        fullscreen_in_front(), area):
+                (root.withdraw if app.hidden else root.deiconify)()
+            if app.wants_focus(hour):          # a new day, or the morning finally came
+                app.asking = True
+                app.set_focus(ask_focus(root), time.time())
+                refresh_menu()
+        if app.advance(now, hour):
+            render(now)
+        root.after(app.tick_ms(), tick)
 
     tick()
     root.mainloop()
@@ -958,155 +1352,35 @@ def run():
 
 # --------------------------------------------------------------------------- self-check
 
-def selftest() -> None:
-    now = time.time()
-    p = Pet(1920, x=0)
-    assert p.cart, "she comes in her cart by default"
-    assert p.asleep(23) and p.asleep(3) and not p.asleep(12)
-    assert p.max_x == 1920 - W
-
-    p.do("walk", now, 999)
-    p.dir = -1
-    for i in range(4000):                       # bounces off both edges, never escapes
-        p.step(now + i * 0.04, 12)
-        assert 0 <= p.x <= p.max_x, p.x
-
-    now += 200
-    assert p.step(now, 23) == "sleep"           # night wins over whatever she was doing
-    assert p.step(now, 12) != "sleep"           # and she wakes up again
-
-    # she stops talking and stops counting your hours the moment you leave the desk
-    p.worked, p.say = 0.0, ""
-    assert p.step(now + 1, 12, away=True) == "away"
-    assert not p.say and p.worked == 0.0, "no pep talks into an empty room"
-    p.step(now + 2, 12)
-    assert p.say in BACK_SAYS, "she notices you came back"
-
-    p.next_line, p.say = now - 1, ""
-    p.step(now, 23)
-    assert not p.say and p.next_line > now, "silent at night, and no blurting on waking"
-    p.state, p.until, p.next_line = "idle", now + 9999, now - 1   # no trick picked over it
-    p.step(now, 12)
-    assert p.say in LINES and p.next_line > now
-
-    p.speak("ahoj", now, 1)
-    p.step(now + 2, 12)
-    assert p.say == "", "speech bubble expires"
-
-    # rolling on a smaller screen than she started on (docking, resolution change)
-    p.screen_w = 400
-    p.do("walk", now, 999)
-    for i in range(200):
-        p.step(now + i * 0.04, 12)
-        assert 0 <= p.x <= p.max_x, p.x
-
-    # the cart
-    before = p.roll
-    p.do("walk", now, 999)
-    p.step(now, 12)
-    assert p.roll > before, "wheels turn while she rolls"
-    p.do("idle", now, 999)
-    held = p.roll
-    p.step(now, 12)
-    assert p.roll == held, "wheels stop when she stops"
-    seen = set()
-    for _ in range(800):
-        p.until, p.worked = 0.0, 0.0            # force a fresh trick every step
-        seen.add(p.step(now, 12))
-    assert "sit" not in seen, "no sitting while in the cart"
-    assert {"lick", "meow", "milk", "grass", "rest", "butt"} <= seen, "all her little things"
-
-    # grass goes down and fur comes up: hairballs follow grass, never out of nowhere
-    for _ in range(40):
-        p.do("grass", now, 1)
-        p.until, p.worked = 0.0, 0.0
-        if p.step(now, 12) == "hairball":
-            break
-    else:
-        raise AssertionError("grass never once led to a hairball")
-
-    # the hourly break is an hour of WORK, not an hour on the clock
-    p = Pet(1920, x=500)
+def smoke() -> None:
+    """A quick check that needs nothing but this file, for people who only have KOCICKA.md."""
+    random.seed(1)
+    p, now = Pet(1920, x=0), 1_000_000.0
     p.last_step = now
-    p.step(now + PAUSE_EVERY / 2, 12)
-    assert p.state != "pause", "half an hour in, no break yet"
-    for i in range(int(PAUSE_EVERY)):           # the rest of the hour, one second at a time
-        if p.step(now + PAUSE_EVERY / 2 + i, 12) == "pause":
-            break
-    assert p.state == "pause", "an hour of work earns a break"
-    started = p.pause_until - PAUSE_SECS
-    assert p.pause_left(started) == PAUSE_SECS and not p.say, "the sign replaces the bubble"
-    assert p.worked == 0.0, "the hour resets"
-    assert p.zoom(started) == 1.0 and p.zoom(started + 1) == PAUSE_ZOOM, "eases up, no popping"
-    assert 1.0 < p.zoom(p.pause_until - 0.25) < PAUSE_ZOOM, "and eases back down"
-    coached = {p.coach_line(started + s) for s in range(0, PAUSE_SECS, 2)}
-    assert len(coached) == PAUSE_SECS // COACH_EVERY, "a new stretch every few seconds"
-    assert coached <= set(PAUSE_COACH) and "" not in coached
-    parked = p.x
-    p.step(started + 2, 12)
-    assert p.state == "pause" and p.x == parked, "frozen in place while the sign is up"
-    assert p.breath_word == "nádech" and 0 < p.breath <= 1, "4-7-8 while she holds the sign"
-    p.step(started + 7, 12)
-    assert p.breath_word == "zadrž" and p.breath == 1.0
-    p.step(started + 15, 12)
-    assert p.breath_word == "výdech" and p.breath < 1.0
-    assert p.step(p.pause_until, 12) != "pause" and p.zoom(p.pause_until) == 1.0
-
-    # the end of the day is a longer sign and she lies down afterwards
-    p.start_pause(now, "end")
-    assert p.kind == "end" and p.pause_left(now) == END_SECS
-    assert p.coach_line(now) in END_COACH
-    p.step(now + END_SECS, 12)
-    assert p.state == "rest", "shift's over, she lies down"
-
-    p.worked = PAUSE_EVERY
-    p.step(now, 23)
-    assert p.state == "sleep", "no breaks in the middle of the night"
-
-    # what she says
-    assert all(len(s) <= 70 for s in LINES), "longer lines overflow the bubble"
-    assert len(LINES) >= 20, "fewer than this and she repeats herself the first day"
-    assert all(len(s) <= 60 for s in PAUSE_COACH + END_COACH), "longer prompts overflow the sign"
-
-    # drinking: she only nags in the afternoon, and stops once you've had enough
-    today = "2026-09-18"
-    assert water_line({}, today, 9) is None, "no nagging before the afternoon"
-    assert "ani jednou" in water_line({}, today, 15)
-    assert "3×" in water_line({"water": {"date": today, "count": 3}}, today, 15)
-    assert water_line({"water": {"date": today, "count": WATER_GOAL}}, today, 15) is None
-    assert water_line({"water": {"date": "2026-09-17", "count": 9}}, today, 15) is not None
-
-    # she picks up where she left off instead of starting over
-    assert greeting({"name": "Claudie"}, today) == "ahoj, jsem Claudie"
-    assert greeting({"name": "Claudie", "first_seen": today}, today) == "ahoj, jsem Claudie"
-    assert "12. den" in greeting(
-        {"name": "C", "first_seen": "2026-09-07", "last_seen": "2026-09-17"}, today)
-    assert "3 dny" in greeting(
-        {"name": "C", "first_seen": "2026-09-01", "last_seen": "2026-09-15"}, today)
-    assert czech_days(1) == "1 den" and czech_days(4) == "4 dny" and czech_days(9) == "9 dní"
-
-    # sensing the machine must never throw, whatever it answers
-    assert idle_seconds() >= 0.0
-    assert sharing_screen() in (True, False)
-
-    # her memory: same name and colour after a restart
-    assert all(len(v) == 3 for v in PALETTES.values()), "fur, shading, nose"
-    assert {k for k, _ in PALETTE_LABELS} == set(PALETTES), "every palette is offered"
-    import tempfile
+    for i in range(1, 3001):
+        p.step(now + i * 0.5, 12)
+        if not 0 <= p.x <= p.max_x:
+            raise AssertionError("she rolled off the screen: %r" % p.x)
+    if abs(p.worked - 1500.0) > 1e-6:
+        raise AssertionError("work time was not counted: %r" % p.worked)
     with tempfile.TemporaryDirectory() as folder:
-        tmp = Path(folder) / "kocka.json"
-        save_config({"name": "Micka", "fur": "seda", "cart": True}, tmp)
-        assert load_config(tmp) == {"name": "Micka", "fur": "seda", "cart": True}
-        tmp.write_text("{ rozbite", encoding="utf-8")
-        assert load_config(tmp) == {}, "a corrupt config must not stop her"
-        tmp.unlink()
-        assert load_config(tmp) == {}, "a missing config must not stop her"
-    set_fur("seda")
-    assert FUR == PALETTES["seda"][0]
-    set_fur("neexistuje")
-    assert FUR == PALETTES["zrzava"][0], "unknown palette falls back"
+        store = Store(Path(folder) / "kocka.json", legacy=None)
+        if not store.save({"name": "Micka"}) or store.load() != {"name": "Micka"}:
+            raise AssertionError("she could not remember her name")
+
+
+def selftest() -> int:
+    """smoke(), then the full tests/ suite when it sits next to this file."""
+    smoke()
+    tests = Path(__file__).resolve().with_name("tests")
+    if tests.is_dir():
+        import unittest
+        suite = unittest.defaultTestLoader.discover(str(tests))
+        if not unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful():
+            return 1
     print("ok")
+    return 0
 
 
 if __name__ == "__main__":
-    selftest() if "--selftest" in sys.argv else run()
+    sys.exit(selftest()) if "--selftest" in sys.argv else run(sys.argv[1:])
