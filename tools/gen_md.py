@@ -1,11 +1,11 @@
 """Builds KOCICKA.md with the real kocicka.py source embedded, so the two never drift.
 
-Run it after every change to kocicka.py:   python _gen_md.py
+Run it after every change to kocicka.py:   python tools/gen_md.py
 """
 import re
 from pathlib import Path
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parent.parent   # the repo root, where kocicka.py lives
 source = (HERE / "kocicka.py").read_text(encoding="utf-8")
 code = source.rstrip()
 # the doc quotes these, so read them out of the source instead of retyping them

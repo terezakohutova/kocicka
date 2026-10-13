@@ -1,5 +1,11 @@
-"""Throwaway: renders every pose side by side so they can be eyeballed in one screenshot."""
+"""Renders every pose side by side for six seconds, so a drawing change can be checked
+in one screenshot (that is how preview.png was made).   python tools/pose.py
+"""
+import sys
 import tkinter as tk
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import kocicka as K
 

@@ -98,7 +98,7 @@ They are currently in Czech - translations are a great first contribution.
 
 ```
 python kocicka.py --selftest     # her logic, no window
-python _pose.py                  # every pose side by side, to check the drawing
+python tools/pose.py                  # every pose side by side, to check the drawing
 python kocicka.py --demo         # speeds the timers up so you see a break now
 ```
 

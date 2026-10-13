@@ -8,13 +8,13 @@ Pull requests welcome. She is meant to be easy to work on.
 
 `KOCICKA.md` is the all-in-one version for sending to people who do not want
 to deal with GitHub - it is the whole README plus the whole source in one
-file, and it is **generated** by `_gen_md.py`. If you edit it directly, the
+file, and it is **generated** by `tools/gen_md.py`. If you edit it directly, the
 next regeneration silently throws your change away.
 
 After changing `kocicka.py`, run:
 
 ```
-python _gen_md.py
+python tools/gen_md.py
 ```
 
 and commit both files together.
@@ -32,7 +32,7 @@ is a single function at the bottom of the file.
 **If you changed anything she draws**, also run:
 
 ```
-python _pose.py
+python tools/pose.py
 ```
 
 It renders every pose side by side in one window. Look at it. Drawing bugs
@@ -44,7 +44,7 @@ caught three real bugs that the self-test happily passed.
 
 - **Standard library only.** No pip installs, ever. That constraint is the
   point: anyone with Python can run her, with no setup and nothing to trust.
-- **One file** for the cat. `_gen_md.py` and `_pose.py` are tools, not part
+- **One file** for the cat. `tools/gen_md.py` and `tools/pose.py` are tools, not part
   of her.
 - Keep it boring and readable. She is a toy that people should be able to
   open in Notepad and understand.
