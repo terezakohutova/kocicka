@@ -10,6 +10,12 @@ you get up from the desk once an hour.
 One file. No dependencies beyond the Python standard library. No installer,
 no account, no telemetry, nothing leaves your machine.
 
+Small, but built to be tested. All the timing logic lives in a `Companion` class
+with no tkinter in it, so breaks, snoozes, idle time and midnight rollover are
+tested without a screen. The Windows calls run against a fake `user32`, and the
+drawing tests check that every pose draws the parts it should (under a virtual
+display on Linux). CI runs all of it on Windows, macOS and Linux.
+
 ![Every pose she has, side by side](preview.png)
 
 > 🇨🇿 Česká verze návodu je níž: [Česky](#česky)
