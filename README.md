@@ -5,7 +5,7 @@
 A desktop cat in a wheelchair who keeps you company while you work, and makes
 you get up from the desk once an hour.
 
-*Kočička* (roughly KOH-chich-kah) is Czech for "kitty". She speaks Czech for now; see [Language](#language).
+*Kočička* (roughly KOH-chich-kah) is Czech for "kitty". She speaks Czech and English; see [Language](#language).
 
 One file. No dependencies beyond the Python standard library. No installer,
 no account, no telemetry, nothing leaves your machine.
@@ -177,10 +177,13 @@ The constants at the top of `kocicka.py` are meant to be edited:
 ## Language
 
 All the text she shows, from her pep talks to the menu and the signs, lives
-in one table, `STRINGS`, at the top of `kocicka.py` (a test checks that no
-Czech has crept in anywhere else). It is Czech only for now, and it talks to a
-woman: Czech grammar marks it ("napila jsem se", "ty bys neměla"). There is no
-language switch yet. A few lines, to give you the voice:
+in one table per language, `LANGUAGES`, at the top of `kocicka.py` (a test
+checks that no Czech has crept in anywhere else). She speaks Czech and English
+and follows your system's language: Czech or Slovak gets Czech, anything else
+English. To choose yourself, run `python kocicka.py --lang=en` (or `--lang=cs`),
+or set `KOCICKA_LANG=en`. The Czech original talks to a woman: Czech grammar
+marks it ("napila jsem se", "ty bys neměla"). The English is written in her
+voice rather than word for word. A few lines, to give you the voice:
 
 | | |
 |---|---|
@@ -188,8 +191,8 @@ language switch yet. A few lines, to give you the voice:
 | *pauza není lenost, je to strategie. zeptej se koček* | a break is not laziness, it is strategy. ask any cat |
 | *ramena dozadu a dolů. celý den je držíš u uší* | shoulders back and down. you've had them by your ears all day |
 
-An English table, written in her voice rather than translated word for word,
-is the most useful contribution anyone could make.
+Another language is one more table of the same shape; `--selftest` checks it
+has every key the Czech one has.
 
 ## Checking it works
 

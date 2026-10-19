@@ -9,6 +9,8 @@ actual work, and calls it a day when the day is done.
   run:        python kocicka.py
   demo:       python kocicka.py --demo        (speeds the timers up so you see it now)
   self-check: python kocicka.py --selftest    (also runs tests/ when it sits next to her)
+  language:   python kocicka.py --lang=en     (or --lang=cs, or set KOCICKA_LANG; without
+                                               either she follows your system's language)
 """
 from __future__ import annotations
 
@@ -71,11 +73,11 @@ BOWL, MILK, GRASS, STAR = "#cfd6de", "#fdfdfb", "#7ba05b", "#d97757"
 PAPER, INK, MUTED = "#faf7f2", "#2b2b2b", "#6b6b6b"
 FONT = "Segoe UI"
 
-# Every word she shows you, in one place. Czech only for now, and she talks to a woman
-# (Czech grammar marks it: "napila jsem se", "ty bys neměla"). A translation is a second
-# table of this same shape; please write it in her voice rather than translating word
-# for word.
-STRINGS = {
+# Every word she shows you, one table per language, all in one place. Czech is the
+# original and talks to a woman (Czech grammar marks it: "napila jsem se", "ty bys
+# neměla"); English is written in her voice rather than word for word. Another language
+# is one more table of this same shape, and smoke() checks it has every key.
+LANGUAGES = {"cs": {
     # encouraging, funny, and always from a cat's point of view
     "lines": [
         "devět životů, dneska stačí zvládnout ten jeden",
@@ -229,7 +231,179 @@ STRINGS = {
     "menu_cart": "vozíček",
     "menu_rename": "přejmenovat / barva",
     "menu_close": "zavřít",
-}
+}, "en": {
+    "lines": [
+        "nine lives, today you only need to get through this one",
+        "even cats fall. then we act like we meant to",
+        "stretch. we do it 40 times a day, and look at us",
+        "if you were a cat, you'd have knocked this off the desk by now",
+        "nobody has it all under control. we're just better at acting",
+        "mrrr. that means i'm rooting for you",
+        "breathe deep. there's no other way to purr",
+        "be better by a hair today. i can lend you one",
+        "when you don't know where to go, sit in a box. works for me",
+        "drink some water. i ignore my bowl too, but you shouldn't",
+        "staring out the window is work too. i put in six hours a day",
+        "it broke? no big deal. i do that on purpose",
+        "your to-do list is not your nine lives",
+        "stand up and stretch. i'll knock something off the desk for you",
+        "you're going the right way, just slower than a mouse. that's fine",
+        "even the best hunter misses. then she pretends she wasn't hunting",
+        "take a break, i'll guard the keyboard",
+        "you've got this. trust a cat, we sense these things early",
+        "you don't have to purr all the time. sometimes just lie there",
+        "a break is not laziness, it is strategy. ask any cat",
+        "your chair is mine now. take it as an invitation to stand up",
+        "head up, ears back, here we go",
+        "if it were easy, it wouldn't feel good. same with me and boxes",
+        "blink. i do it slowly, and it means i love you",
+        "it fell off the desk? then it had no business being there",
+        "you've done enough today. trust me, i was here the whole time",
+        "don't feel like it? lie down on it. that's how i solve everything",
+        "you don't have to please everyone. i only bother when i'm hungry",
+        "close five tabs. even i only keep one mouse in my head",
+        "not working? try it from the other side. or from above",
+        "first try didn't work? that's what the nine lives are for",
+        "sun on the keyboard means break time. that's the law",
+        "my best ideas come at 3 am. you're better off not hearing them",
+        "no need to run. cats walk and still get everywhere first",
+        "count to ten, then send it. or knock it off the desk",
+        "your emails won't run off. i'm watching, they're slow as turtles",
+        "sit down and start. sitting down takes me half an hour",
+        "scared? puff yourself up. works on dogs every time",
+        "you don't have to be a big cat today. just be a cat",
+        "your worth isn't the number of boxes you ticked",
+        "whoever keeps watching the clock never catches the mouse",
+        "hungry? go eat. i'd have told you ages ago",
+        "your tea went cold. that means you've been sitting too long",
+        "staring won't fix it. staring at me might. keep going",
+        "too much at once? do one thing. mine is this one: sleeping",
+        "your morning starts when you stretch. not a minute sooner",
+        "saved it for later? later is today too",
+        "be kind to yourself. you're the only you you've got",
+        "you're faster than you think. you're just saving energy",
+        "i knocked it off. but it could have been the draught",
+        "don't know what to say? stay quiet and stare. works for me",
+        "your head isn't a machine. it's a cat. it needs naps",
+        "the work was here before you and it'll be here after you",
+        "don't do ten things at once. i don't have ten paws either",
+        "someone annoying you? turn your back on them. i'll teach you",
+        "praise yourself out loud. i purr just for me, too",
+        "stuck? let it sit. things look better in the morning",
+        "the task you dread usually takes about ten minutes",
+        "have a warm tea and do nothing for a bit. that's the whole trick",
+        "you don't have to reply right away. i reply when i'm hungry",
+        "comparing yourself to others is chasing your own tail",
+        "today it's enough to survive. tomorrow we hunt again",
+        "nobody's watching you. well, i am, but i've got your back",
+        "cold? pull a blanket over. the work can wait somewhere warm",
+        "the fear of a mistake is bigger than the mistake. trust a cat",
+        "put the phone down. there's nothing in it i don't already know",
+        "in for four, hold for seven, out for eight. i'll purr along",
+        "it doesn't have to be done. today it only has to be started",
+        "let your doubts sleep. i'm lying on them right now",
+        "call her. i'd at least meow at her",
+        "writing it badly still beats not writing it",
+        "when you're tired, come lie down. i'll make room",
+        "close that inbox and get some air. i'll watch the window",
+        "unfinished isn't broken. it's just waiting",
+        "you can't do it all. i can't lick a whole paw at once either",
+        "you did more today than you remember. i keep count",
+    ],
+    "meows": ["meow", "mrrrp", "meeeow", "prrr", "mrr?"],
+    "hairball": ["hck... hck...", "ahem. one moment", "don't look at me"],
+    "butt": ["this is for you", "*tail up*", "look", "well?"],
+    "back": ["and you're back", "where were you?", "i kept an eye on it", "*stretches*"],
+    "pause_coach": [
+        "stand up and stretch. like a cat after a nap",
+        "arms over your head, arch your back. hold it and breathe",
+        "turn your head left, then right. slowly, no rush",
+        "shoulders back and down. they've been up by your ears",
+        "look out the window at something far away. eyes, rest",
+        "stretch your neck. you've stared down at a mouse all day",
+        "stand on tiptoe and reach for the ceiling",
+        "roll your shoulders back. five times. i'm counting with you",
+        "sit up straight and take a deep breath. three times",
+        "shake out your hands and wrists. you've typed since morning",
+    ],
+    "end_coach": [
+        "close it. it'll still be there tomorrow",
+        "whatever's left runs off slowly, like an old mouse",
+        "shift's over. go lie down in a box",
+        "done beats perfect. ask any cat",
+        "stand up. no more sitting in that chair today",
+        "one last stretch, then step away from the desk",
+        "good work. now leave it alone",
+    ],
+    "breath": ("inhale", "hold", "exhale"),
+    "sign_break": ("STOP", "break time"),
+    "sign_end": ("SHIFT'S OVER", "done. close it"),
+    "sign_count": "%d s  ·  %s",
+    "fallback_name": "Kitty",
+    "hello": "hi, i'm %s",
+    "missed_you": "i missed you! we haven't seen each other in %s",
+    "day_n": "me again. day %d together",
+    "days": ("day", "days", "days"),
+    "minutes": ("minute", "minutes", "minutes"),
+    "water_none": "you haven't had a drink today. not one. i'm watching",
+    "water_some": "we've had %d today. fine for a cat, not much for a human",
+    "water_count": "glass %d today. %d to go",
+    "water_done": "glass %d. that's the lot",
+    "focus_none": "today: (nothing)",
+    "focus_today": "today: ",
+    "focus_done": "done: ",
+    "focus_proud": "i'm proud of you",
+    "focus_undo": "okay, onwards",
+    "focus_title": "One thing",
+    "focus_ask": "What's the one thing you want done today?",
+    "focus_ok": "on it",
+    "renamed": "now i'm %s",
+    "skipped": "fine, not this time. next time, though",
+    "snoozed": "in %s, then. i'll keep watch",
+    "cant_save": "i can't remember anything, i'm not allowed to write to my folder",
+    "welcome_title": "Welcome!",
+    "welcome_head": "You have a new cat.",
+    "welcome_sub": "Pick her colour and give her a name.",
+    "welcome_name": "What will she be called?",
+    "welcome_go": "Come here!",
+    "fur_labels": (("zrzava", "ginger"), ("seda", "grey"),
+                   ("smetanova", "cream"), ("cerna", "black")),
+    "menu_come": "come here",
+    "menu_paw": "paw, please",
+    "menu_milk": "milk",
+    "menu_drank": "i drank some water",
+    "menu_say": "say something",
+    "menu_break": "let's take a break",
+    "menu_skip": "skip the break",
+    "menu_snooze": "break in %s",
+    "menu_cart": "cart",
+    "menu_rename": "rename / colour",
+    "menu_close": "close",
+}}
+
+
+def system_language(env=os.environ) -> str:
+    """The system's language, lowercase ("cs", "en_us.utf-8", ...), "" if it won't say.
+    Windows: the display language. Elsewhere: the variables gettext reads, in its order."""
+    with contextlib.suppress(AttributeError, OSError):
+        primary = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF
+        return {0x05: "cs", 0x1B: "sk"}.get(primary, "en")
+    for name in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        if env.get(name):
+            return env[name].lower()
+    return ""
+
+
+def pick_language(argv=sys.argv, env=os.environ) -> str:
+    """--lang=en or KOCICKA_LANG=en if you ask for one, else the system's: Czech and Slovak
+    get Czech, everyone else English."""
+    asked = next((a[7:] for a in argv if a.startswith("--lang=")), env.get("KOCICKA_LANG", ""))
+    if asked.lower() in LANGUAGES:
+        return asked.lower()
+    return "cs" if system_language(env)[:2] in ("cs", "sk") else "en"
+
+
+STRINGS = LANGUAGES[pick_language()]
 
 # what she gets up to on her own, and how long each one lasts
 TRICKS = ("walk", "walk", "walk", "idle", "lick", "meow", "milk", "grass",
@@ -1597,6 +1771,15 @@ def smoke() -> None:
         store = Store(Path(folder) / "kocka.json", legacy=None)
         if not store.save({"name": "Micka"}) or store.load() != {"name": "Micka"}:
             raise AssertionError("she could not remember her name")
+    cs = LANGUAGES["cs"]
+    for code, table in LANGUAGES.items():
+        if table.keys() != cs.keys():
+            raise AssertionError("%s and cs differ in keys: %r" % (code, set(table) ^ set(cs)))
+        for key, value in cs.items():          # same kind of thing, same number of blanks
+            other = table[key]
+            if (type(other) is not type(value) or str(other).count("%") != str(value).count("%")
+                    or isinstance(value, tuple) and len(other) != len(value)):
+                raise AssertionError("%s[%r] doesn't fit where cs[%r] goes" % (code, key, key))
 
 
 def selftest() -> int:

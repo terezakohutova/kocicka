@@ -62,15 +62,15 @@ caught three real bugs that the self-test happily passed.
 - Anything platform-specific must degrade quietly, not crash. See
   `idle_seconds()`, `fullscreen_in_front()` and `work_area()` for the
   pattern - they return a safe default when the Windows APIs are not there.
-- Every word she shows goes in `STRINGS`. A test fails if Czech turns up
-  anywhere else in the file.
+- Every word she shows goes in `LANGUAGES`, once per language. A test fails
+  if Czech turns up anywhere else in the file, or if a language is missing a key.
 
 ## Good first contributions
 
-- **Translations.** Everything she shows is in the `STRINGS` table, all in
-  Czech right now and addressed to a woman. An English table in her voice
-  (not a word-for-word translation) would roughly double who can use her;
-  it also needs a small way to pick the language, which does not exist yet.
+- **Translations.** Everything she shows is in the `LANGUAGES` table, in
+  Czech (addressed to a woman) and English. Another language is one more
+  table of the same shape, in her voice rather than word for word, plus its
+  code in `pick_language()` if the system should choose it on its own.
 - **macOS and Linux.** Transparent backgrounds, fullscreen detection and the
   taskbar position are Windows-only today. Idle detection works on macOS and on
   Linux under X11 with `xprintidle`; Wayland has no answer yet.
