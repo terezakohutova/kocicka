@@ -5,6 +5,7 @@ remembering you, what a click does, where she stands. Standard library only, lik
 """
 import ast
 import ctypes
+import os
 import random
 import sys
 import tempfile
@@ -14,6 +15,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+os.environ["KOCICKA_LANG"] = "cs"        # the tests read Czech, whatever the machine speaks
 
 import kocicka as K  # noqa: E402
 
@@ -288,7 +290,7 @@ class Words(unittest.TestCase):
         # the README promises this; any Czech outside STRINGS breaks the promise
         tree = ast.parse((ROOT / "kocicka.py").read_text(encoding="utf-8"))
         table = next(n for n in tree.body if isinstance(n, ast.Assign)
-                     and getattr(n.targets[0], "id", "") == "STRINGS")
+                     and getattr(n.targets[0], "id", "") == "LANGUAGES")
         inside = {id(n) for n in ast.walk(table)}
         stray = [n.value for n in ast.walk(tree)
                  if isinstance(n, ast.Constant) and isinstance(n.value, str)
@@ -302,6 +304,27 @@ class Words(unittest.TestCase):
                  and isinstance(n.slice, ast.Constant)}
         self.assertTrue(asked)
         self.assertLessEqual(asked, set(S))
+
+    def test_every_language_has_every_line_and_fits_the_bubble(self):
+        K.smoke()                        # same keys, same shapes, same blanks as Czech
+        for code, table in K.LANGUAGES.items():
+            self.assertTrue(all(len(s) <= 70 for s in table["lines"]), code)
+            self.assertTrue(all(len(s) <= 60 for s in table["pause_coach"] + table["end_coach"]),
+                            code)
+            self.assertEqual({k for k, _ in table["fur_labels"]}, set(K.PALETTES), code)
+
+    def test_language_follows_the_switch_then_the_system(self):
+        self.assertEqual(K.pick_language(["--lang=en"], {"KOCICKA_LANG": "cs"}), "en")
+        self.assertEqual(K.pick_language([], {"KOCICKA_LANG": "EN"}), "en")
+        with mock.patch.object(K, "system_language", return_value="cs_cz.utf-8"):
+            self.assertEqual(K.pick_language(["--lang=xx"], {}), "cs", "unknown: the system's")
+        with mock.patch.object(K, "system_language", return_value="sk"):
+            self.assertEqual(K.pick_language([], {}), "cs")
+        with mock.patch.object(K, "system_language", return_value=""):
+            self.assertEqual(K.pick_language([], {}), "en")
+        if not hasattr(ctypes, "windll"):
+            self.assertEqual(K.system_language({"LANG": "cs_CZ.UTF-8"}), "cs_cz.utf-8")
+            self.assertEqual(K.system_language({}), "")
 
     def test_every_palette_is_offered(self):
         self.assertEqual({k for k, _ in S["fur_labels"]}, set(K.PALETTES))
