@@ -57,6 +57,12 @@ caught three real bugs that the self-test happily passed.
   point: anyone with Python can run her, with no setup and nothing to trust.
 - **One file** for the cat. `tools/gen_md.py` and `tools/pose.py` are tools, not part
   of her.
+- **Her new look is pictures inside that file.** The ChatGPT sheets live in
+  `art/`; `python tools/sprites.py` (needs Pillow, the cat never does) cuts them
+  out and rewrites the `SPRITES` table at the bottom of `kocicka.py`. Never edit
+  that table by hand. Her coat and cart colours are palette swaps in
+  `sprite_palette()`, not extra pictures. The classic look stays exactly as it
+  was, drawn in code in `draw()`.
 - Keep it boring and readable. She is a toy that people should be able to
   open in Notepad and understand.
 - Anything platform-specific must degrade quietly, not crash. See
@@ -75,7 +81,8 @@ caught three real bugs that the self-test happily passed.
   taskbar position are Windows-only today. Idle detection works on macOS and on
   Linux under X11 with `xprintidle`; Wayland has no answer yet.
 - **More poses.** They are self-contained: add a state to `TRICKS`, give it
-  a duration in `DURATION`, draw it in `draw()`, and check it on the pose
+  a duration in `DURATION`, draw it in `draw()`, give it a picture in `CUTE`
+  (a new sheet in `art/` plus a line in `tools/sprites.py`), and check it on the pose
   sheet.
 - **A recording.** The README has stills of every pose and of the break sign,
   but an animated GIF of her rolling around would show her off better.

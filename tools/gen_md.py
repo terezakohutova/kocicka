@@ -66,7 +66,7 @@ Ověříš to tak, že v Příkazovém řádku napíšeš `python --version` a v
    (Můžeš to nechat prázdné, nevadí.)
 
 Do složky `%APPDATA%\\kocicka` si uloží soubor `kocka.json`, kde si pamatuje jméno,
-barvu, kolik jste spolu dní a kolikrát ses dneska napila. Nikam se neposílá. (Starší
+barvu, vzhled, kolik jste spolu dní, kolikrát ses dneska napila a tvoje wellness body. Nikam se neposílá. (Starší
 verze ho měly vedle `kocicka.py`; při prvním spuštění si ho přenese sama a ten starý
 můžeš smazat. Na Macu je v `~/Library/Application Support/kocicka`, na Linuxu
 v `~/.config/kocicka`.)
@@ -138,13 +138,30 @@ Ráno se zeptá, co je dneska ta jedna věc. Máš ji pak nahoře v menu. Když 
 hotovou, klikni na ni a je z toho `hotovo:`. Zítra se zeptá znovu, i když ji necháš
 běžet přes noc.
 
+**Dva vzhledy: nový a klasický**
+
+Nová kočička je roztomilá kreslená (velká hlava, lesklá očička, růžové tvářičky).
+Když se ti zasteskne po té staré, nakreslené čistě kódem, pravý klik -> `vzhled` ->
+`klasický`. Vybraný vzhled si pamatuje.
+
+**Wellness body**
+
+Za skutečné věci, které už hlídá, dostaneš bod a nad hlavou jí na chvilku vyskočí
+srdíčko: za pauzu, kterou vydržíš celých 30 vteřin, za každou skleničku vody do
+denního cíle, za odškrtnutou jednu věc dne a za to, že po ceduli ŠICHTA KONČÍ opravdu
+odejdeš od počítače. Body se nikdy neodečítají a za nic ti nevyčítá.
+
+Za body si odemkneš doplňky: mašličku, čepičku a jinou barvu vozíčku. Najdeš je
+v menu pod `wellness body`, spolu s přehledem posledních sedmi dní a sérií dní za sebou
+(víkend bez bodů sérii nepřeruší). Doplňky jsou vidět v novém vzhledu.
+
 **Když na ni sáhneš**
 
 | Akce | Co udělá |
 |---|---|
 | **Levý klik** | dá packu a něco ti řekne; na konci dne složí ceduli |
 | **Tažení myší** | přesuneš ji po šířce obrazovky |
-| **Pravý klik** | celé menu: dnešní věc, pojď sem, dej packu, mlíčko, napila jsem se, řekni něco, dáme pauzu, přeskočit pauzu, pauzu až za {snooze}, vozíček, přejmenovat / barva, zavřít |
+| **Pravý klik** | celé menu: dnešní věc, pojď sem, dej packu, mlíčko, napila jsem se, řekni něco, dáme pauzu, přeskočit pauzu, pauzu až za {snooze}, vozíček, vzhled, wellness body, přejmenovat / barva, zavřít |
 
 ---
 
