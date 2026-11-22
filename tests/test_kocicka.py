@@ -1242,9 +1242,11 @@ class Wellness(AppTest):
     def points(self, app):
         return K.wellness(app.cfg)["total"]
 
-    def test_a_break_sat_through_to_the_end_earns_a_point(self):
+    def test_the_hourly_break_sat_through_to_the_end_earns_a_point(self):
         app = self.app()
-        app.pet.start_pause(NOW)
+        app.pet.worked = K.PAUSE_EVERY
+        app.advance(NOW, NOON)
+        self.assertEqual(app.pet.state, "pause")
         app.advance(NOW + K.PAUSE_SECS + 1, NOON)
         self.assertEqual(self.points(app), 1)
         self.assertGreater(app.pet.heart_until, NOW + K.PAUSE_SECS + 1)
@@ -1263,6 +1265,15 @@ class Wellness(AppTest):
         app.snooze(NOW + 105)
         app.advance(NOW + 200, NOON)
         self.assertEqual(self.points(app), 5)
+
+    def test_a_break_from_the_menu_is_welcome_but_not_a_points_machine(self):
+        app = self.app()
+        t = NOW
+        for _ in range(5):
+            app.pet.start_pause(t)
+            t += K.PAUSE_SECS + 2
+            app.advance(t, NOON)
+        self.assertEqual(self.points(app), 0)
 
     def test_the_end_of_day_sign_alone_is_not_a_point(self):
         app = self.app()
@@ -1336,6 +1347,10 @@ class Wellness(AppTest):
             self.assertGreaterEqual(w["total"], 0)
             self.assertEqual(w["cart"], K.DEFAULT_CART)
             self.assertEqual(w["wear"], [])
+        for bad in ({"cart": ["mata"]}, {"cart": {"x": 1}}, {"wear": [["bow"]]}):
+            K.Companion({"name": "M", "wellness": bad}, self.store, working_pet(), TODAY, NOW)
+        odd = {"zzz%02d" % i: 1 for i in range(70)}
+        self.assertEqual(K.wellness({"wellness": {"days": odd}})["days"], {})
         app = self.app({"name": "M", "wellness": "x"})
         app.drank(NOW)
         self.assertEqual(self.points(app), 1)
@@ -1376,6 +1391,10 @@ class Wellness(AppTest):
         self.assertIn(str(dict(K.REWARDS)["mata"]), locked)
         app.set_look("classic", NOW)
         self.assertEqual(app.points_menu()[-1][1], S["new_look_only"])
+        sneaky = self.app({"name": "M",
+                           "wellness": {"total": 3, "wear": ["bow"], "cart": "ruzova"}})
+        ticked = {r[2] for r in sneaky.points_menu() if r[4]}
+        self.assertEqual(ticked, {"fialova"}, "a locked thing is never shown as worn")
 
     def test_the_look_is_remembered_and_new_by_default(self):
         app = self.app()

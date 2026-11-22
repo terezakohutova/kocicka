@@ -146,8 +146,8 @@ Když se ti zasteskne po té staré, nakreslené čistě kódem, pravý klik -> 
 
 **Wellness body**
 
-Za skutečné věci, které už hlídá, dostaneš bod a nad hlavou jí na chvilku vyskočí
-srdíčko: za pauzu, kterou vydržíš celých 30 vteřin, za každou skleničku vody do
+Za skutečné věci, které už hlídá, dostaneš bod (v novém vzhledu jí nad hlavou na chvilku
+vyskočí srdíčko): za hodinovou pauzu, kterou vydržíš celých 30 vteřin, za každou skleničku vody do
 denního cíle, za odškrtnutou jednu věc dne a za to, že po ceduli ŠICHTA KONČÍ opravdu
 odejdeš od počítače. Body se nikdy neodečítají a za nic ti nevyčítá.
 

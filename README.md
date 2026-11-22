@@ -61,9 +61,9 @@ Most desktop pets are decoration. This one actually looks after you:
   you have put in half an hour of work that day, then lies down. A click puts
   the sign down; right click pushes it back 10 minutes.
 - **She gives you wellness points for real things**, never for screen time: a
-  break sat through to the end, each glass of water up to the daily goal,
+  the hourly break sat through to the end, each glass of water up to the daily goal,
   today's one thing ticked off, and actually leaving the desk within an hour of
-  the end-of-day sign. A small heart pops up over her head; that is all. Points
+  the end-of-day sign. In the new look a small heart pops up over her head; that is all. Points
   are never taken away and she never brings up what you didn't do. They unlock
   a bow, a hat and new cart colours, and her menu shows the last seven days and
   your streak (a weekend off doesn't break it).
@@ -244,7 +244,7 @@ barvu a jméno, pak už naskakuje rovnou. Kdo nechce řešit GitHub, pošli mu
 vyblije chlupy, občas vyleze z vozíku a zdřímne si vedle něj. Každých pár
 minut ti řekne něco povzbuzujícího. Jednou za hodinu **skutečné práce** tě
 zastaví, zvedne ceduli STOP a vede tě protahováním a dýcháním 4-7-8.
-Odpoledne ti řekne, ať to zavřeš. Za dokončenou pauzu, vodu, odškrtnutou
+Odpoledne ti řekne, ať to zavřeš. Za dokončenou hodinovou pauzu, vodu, odškrtnutou
 věc dne a konec práce včas dává wellness body, za které odemkneš mašličku,
 čepičku a barvu vozíčku. Body nikdy nebere a nic nevyčítá. Pozná, když nejsi u počítače, a schová se,
 když je vepředu aplikace přes celou obrazovku (prezentace, hovor nebo video

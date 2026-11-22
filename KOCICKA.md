@@ -129,8 +129,8 @@ Když se ti zasteskne po té staré, nakreslené čistě kódem, pravý klik -> 
 
 **Wellness body**
 
-Za skutečné věci, které už hlídá, dostaneš bod a nad hlavou jí na chvilku vyskočí
-srdíčko: za pauzu, kterou vydržíš celých 30 vteřin, za každou skleničku vody do
+Za skutečné věci, které už hlídá, dostaneš bod (v novém vzhledu jí nad hlavou na chvilku
+vyskočí srdíčko): za hodinovou pauzu, kterou vydržíš celých 30 vteřin, za každou skleničku vody do
 denního cíle, za odškrtnutou jednu věc dne a za to, že po ceduli ŠICHTA KONČÍ opravdu
 odejdeš od počítače. Body se nikdy neodečítají a za nic ti nevyčítá.
 
@@ -652,6 +652,7 @@ class Pet:
         self.cart_colour = DEFAULT_CART
         self.completed = ""     # the kind of sign she just held to the very end, once
         self.heart_until = 0.0  # a little heart over her head after a wellness point
+        self.due = False        # the sign up now is the hourly break she owed you
 
     @property
     def max_x(self) -> float:
@@ -680,6 +681,7 @@ class Pet:
         self.until = now + secs
 
     def start_pause(self, now: float, kind: str = "break") -> None:
+        self.due = False
         span = PAUSE_SECS if kind == "break" else END_SECS
         prompts = STRINGS["pause_coach" if kind == "break" else "end_coach"]
         self.state, self.dir, self.say, self.kind = "pause", 1, "", kind
@@ -743,7 +745,9 @@ class Pet:
         if self.state == "pause":
             self._breathe(now)
             if now >= self.pause_until:
-                self.completed = self.kind     # sat through all of it: that earns a point
+                # sat through all of it. Only the hourly one earns a point, or a break
+                # from the menu every two minutes would be a points machine
+                self.completed = self.kind if self.due or self.kind != "break" else ""
                 self.finish_pause(now)
             return self.state
 
@@ -770,6 +774,7 @@ class Pet:
             return self.state
         if self.break_due(now):
             self.start_pause(now)
+            self.due = True                    # the hourly one, earned by an hour of work
             return self.state
         if night:
             self.state = "sleep"
@@ -1530,6 +1535,13 @@ def water_line(cfg: dict, today: str, hour: int) -> str | None:
     return STRINGS["water_some"] % drunk
 
 
+def _is_day(d) -> bool:
+    try:
+        return isinstance(d, str) and date.fromisoformat(d).isoformat() == d
+    except ValueError:
+        return False
+
+
 def _count(n) -> int:
     return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else 0
 
@@ -1540,12 +1552,13 @@ def wellness(cfg: dict) -> dict:
     w = cfg.get("wellness")
     w = w if isinstance(w, dict) else {}
     days = w.get("days") if isinstance(w.get("days"), dict) else {}
-    days = {d: _count(n) for d, n in days.items() if isinstance(d, str) and _count(n)}
+    days = {d: _count(n) for d, n in days.items() if _is_day(d) and _count(n)}
     wear = w.get("wear") if isinstance(w.get("wear"), list) else []
     return {"days": days, "total": _count(w.get("total")) or sum(days.values()),
             "focus": w.get("focus"), "end": w.get("end"),
             "wear": [x for x in WEARABLES if x in wear],
-            "cart": w.get("cart") if w.get("cart") in CART_COLOURS else DEFAULT_CART}
+            "cart": w.get("cart") if isinstance(w.get("cart"), str)
+            and w.get("cart") in CART_COLOURS else DEFAULT_CART}
 
 
 def unlocked(total: int, item: str) -> bool:
@@ -1708,8 +1721,9 @@ class Companion:
                 ("info", STRINGS["points_how"], "", False, False),
                 ("sep", "", "", False, False)]
         labels, need = STRINGS["reward_labels"], dict(REWARDS)
-        for kind, keys, on in (("wear", WEARABLES, lambda x: x in w["wear"]),
-                               ("cart", tuple(CART_COLOURS), lambda x: x == w["cart"])):
+        on_her = set(self.pet.wear) | {self.pet.cart_colour}    # unlocked and picked
+        for kind, keys, on in (("wear", WEARABLES, lambda x: x in on_her),
+                               ("cart", tuple(CART_COLOURS), lambda x: x in on_her)):
             for x in keys:
                 ok = unlocked(total, x)
                 label = labels[x] if ok else STRINGS["locked"] % (labels[x], need[x])
