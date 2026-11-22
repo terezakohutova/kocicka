@@ -3,6 +3,8 @@ in one screenshot (that is how preview.png was made).   python tools/pose.py
 
 With "break" it shows the hourly break instead, frozen mid-countdown with the sign up
 (that is how break.png was made).                        python tools/pose.py break
+With "classic" it shows the classic look, drawn in code, instead of the new one; with
+"dressed" the new look wears her bow and hat, and a grey coat on a mint cart.
 """
 import sys
 import tkinter as tk
@@ -15,6 +17,8 @@ import kocicka as K
 STATES = ["walk", "idle", "lick", "meow", "milk", "grass", "hairball", "rest",
           "away", "butt", "highfive", "sit", "sleep", "pause"]
 PER_ROW = 7
+LOOK = "classic" if "classic" in sys.argv[1:] else "new"
+DRESSED = "dressed" in sys.argv[1:]
 
 
 def pose_sheet(root):
@@ -28,6 +32,9 @@ def pose_sheet(root):
             c = tk.Canvas(cell, width=K.W, height=K.H, bg="white", highlightthickness=1)
             c.pack()
             pet = K.Pet(1000)
+            pet.look = LOOK
+            if DRESSED:
+                pet.wear, pet.fur, pet.cart_colour = ("bow", "hat"), "seda", "mata"
             pet.state = st
             pet.cart = st != "sit"
             pet.progress = 0.8
@@ -39,6 +46,7 @@ def pose_sheet(root):
 def break_sign(root):
     """Exactly what render() draws during a break, 9 seconds in (second stretch, holding)."""
     pet = K.Pet(1000)
+    pet.look = LOOK
     pet.start_pause(0.0)
     now = 9.0
     pet.step(now, 12)

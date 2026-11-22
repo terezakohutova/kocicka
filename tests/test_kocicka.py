@@ -1236,5 +1236,349 @@ class Drawing(unittest.TestCase):
             self.assertIn(S["sign_count"] % (p.pause_left(NOW + 9), p.breath_word), texts)
 
 
+# --------------------------------------------------------------------------- wellness points
+
+class Wellness(AppTest):
+    def points(self, app):
+        return K.wellness(app.cfg)["total"]
+
+    def test_the_hourly_break_sat_through_to_the_end_earns_a_point(self):
+        app = self.app()
+        app.pet.worked = K.PAUSE_EVERY
+        app.advance(NOW, NOON)
+        self.assertEqual(app.pet.state, "pause")
+        app.advance(NOW + K.PAUSE_SECS + 1, NOON)
+        self.assertEqual(self.points(app), 1)
+        self.assertGreater(app.pet.heart_until, NOW + K.PAUSE_SECS + 1)
+        self.assertEqual(self.store.load()["wellness"]["total"], 1, "and she wrote it down")
+        app.advance(NOW + K.PAUSE_SECS + 2, NOON)
+        self.assertEqual(self.points(app), 1, "once per break, not once per frame")
+
+    def test_a_skipped_or_cut_short_break_earns_nothing_and_takes_nothing(self):
+        app = self.app({"name": "M", "wellness": {"total": 5}})
+        app.pet.start_pause(NOW)
+        app.advance(NOW + 5, NOON)
+        app.skip(NOW + 6)
+        app.advance(NOW + K.PAUSE_SECS + 1, NOON)
+        self.assertEqual(self.points(app), 5)
+        app.pet.start_pause(NOW + 100)
+        app.snooze(NOW + 105)
+        app.advance(NOW + 200, NOON)
+        self.assertEqual(self.points(app), 5)
+
+    def test_a_break_from_the_menu_is_welcome_but_not_a_points_machine(self):
+        app = self.app()
+        t = NOW
+        for _ in range(5):
+            app.pet.start_pause(t)
+            t += K.PAUSE_SECS + 2
+            app.advance(t, NOON)
+        self.assertEqual(self.points(app), 0)
+
+    def test_the_end_of_day_sign_alone_is_not_a_point(self):
+        app = self.app()
+        app.pet.start_pause(NOW, "end")
+        app.advance(NOW + K.END_SECS + 1, NOON)
+        self.assertEqual(self.points(app), 0)
+
+    def test_water_counts_up_to_the_daily_goal(self):
+        app = self.app()
+        for _ in range(K.WATER_GOAL + 3):
+            app.drank(NOW)
+        self.assertEqual(self.points(app), K.WATER_GOAL)
+
+    def test_the_one_thing_once_a_day_and_unticking_takes_nothing_back(self):
+        app = self.app()
+        app.set_focus("napsat report", NOW)
+        app.toggle_focus(NOW)
+        app.toggle_focus(NOW)
+        app.toggle_focus(NOW)
+        self.assertEqual(self.points(app), 1)
+        app.new_day("2026-10-14", NOW + 86400)
+        app.set_focus("zase", NOW + 86400)
+        app.toggle_focus(NOW + 86400)
+        self.assertEqual(self.points(app), 2, "and again tomorrow")
+
+    def test_leaving_after_the_end_sign_is_finishing_on_time(self):
+        app = self.app()
+        self.work(app, K.END_AFTER_WORK + 5)
+        t = NOW + K.END_AFTER_WORK + 10
+        app.slow(t, K.WORK_END, TODAY, 0, False)
+        self.assertEqual(app.pet.state, "pause")
+        app.slow(t + 600, K.WORK_END, TODAY, K.AWAY_AFTER + 1, False)
+        self.assertEqual(self.points(app), 1)
+        app.slow(t + 700, K.WORK_END, TODAY, K.AWAY_AFTER + 1, False)
+        self.assertEqual(self.points(app), 1, "once a day")
+
+    def test_leaving_hours_after_the_sign_is_not_on_time(self):
+        app = self.app()
+        self.work(app, K.END_AFTER_WORK + 5)
+        t = NOW + K.END_AFTER_WORK + 10
+        app.slow(t, K.WORK_END, TODAY, 0, False)
+        late = t + K.END_GRACE + K.AWAY_AFTER + 60
+        app.slow(late, K.WORK_END + 2, TODAY, K.AWAY_AFTER + 1, False)
+        self.assertEqual(self.points(app), 0)
+
+    def test_rewards_unlock_once_and_she_says_so(self):
+        need = dict(K.REWARDS)["bow"]
+        app = self.app({"name": "M", "wellness": {"total": need - 1}})
+        self.assertFalse(app.toggle_wear("bow", NOW), "still locked")
+        app.drank(NOW)
+        self.assertEqual(app.pet.say, S["unlocked"] % S["reward_won"]["bow"])
+        self.assertTrue(app.toggle_wear("bow", NOW))
+        self.assertEqual(app.pet.wear, ("bow",))
+        self.assertTrue(app.toggle_wear("bow", NOW))
+        self.assertEqual(app.pet.wear, ())
+        self.assertFalse(app.set_cart_colour("ruzova", NOW))
+        self.assertEqual(app.pet.cart_colour, K.DEFAULT_CART)
+
+    def test_what_she_wears_comes_back_after_a_restart(self):
+        app = self.app({"name": "M", "wellness": {"total": 500}})
+        app.toggle_wear("hat", NOW)
+        app.set_cart_colour("mata", NOW)
+        again = K.Companion(self.store.load(), self.store, working_pet(), TODAY, NOW)
+        self.assertEqual((again.pet.wear, again.pet.cart_colour), (("hat",), "mata"))
+
+    def test_nonsense_on_disk_is_ignored(self):
+        for junk in ("x", [], {"days": "x", "total": -3, "wear": "bow", "cart": "zlata"},
+                     {"days": {"2026-10-13": True, 5: 3, "2026-10-12": 2}, "total": "9"}):
+            w = K.wellness({"wellness": junk})
+            self.assertTrue(all(isinstance(n, int) and n > 0 for n in w["days"].values()))
+            self.assertGreaterEqual(w["total"], 0)
+            self.assertEqual(w["cart"], K.DEFAULT_CART)
+            self.assertEqual(w["wear"], [])
+        for bad in ({"cart": ["mata"]}, {"cart": {"x": 1}}, {"wear": [["bow"]]}):
+            K.Companion({"name": "M", "wellness": bad}, self.store, working_pet(), TODAY, NOW)
+        odd = {"zzz%02d" % i: 1 for i in range(70)}
+        self.assertEqual(K.wellness({"wellness": {"days": odd}})["days"], {})
+        app = self.app({"name": "M", "wellness": "x"})
+        app.drank(NOW)
+        self.assertEqual(self.points(app), 1)
+
+    def test_a_streak_survives_the_weekend_but_not_a_weekday(self):
+        days = {"2026-10-08": 3, "2026-10-09": 1, "2026-10-12": 2, "2026-10-13": 4}  # Thu..Tue
+        self.assertEqual(K.streak(days, "2026-10-13"), 4)
+        self.assertEqual(K.streak(days, "2026-10-14"), 4, "today has not happened yet")
+        self.assertEqual(K.streak(days, "2026-10-15"), 0, "a whole weekday without any")
+        self.assertEqual(K.streak({}, TODAY), 0)
+        self.assertEqual(K.streak(days, "nonsense"), 0)
+
+    def test_the_week_reads_oldest_first(self):
+        line = K.week({"2026-10-13": 4, "2026-10-07": 1}, "2026-10-13")
+        parts = line.split(S["week_join"])
+        self.assertEqual(len(parts), 7)
+        self.assertEqual(parts[0], S["weekdays"][2] + " 1")      # Wed the 7th
+        self.assertEqual(parts[-1], S["weekdays"][1] + " 4")     # Tue the 13th
+
+    def test_old_days_are_let_go_but_the_total_stays(self):
+        days = {"2026-%02d-%02d" % (m, d): 1 for m in range(1, 10) for d in range(1, 29)}
+        app = self.app({"name": "M", "wellness": {"days": days, "total": len(days)}})
+        app.drank(NOW)
+        w = K.wellness(app.cfg)
+        self.assertLessEqual(len(w["days"]), 62)
+        self.assertEqual(w["total"], len(days) + 1)
+
+    def test_the_points_menu(self):
+        app = self.app({"name": "M", "wellness": {"total": dict(K.REWARDS)["hat"]}})
+        rows = app.points_menu()
+        kinds = [r[0] for r in rows]
+        self.assertEqual(kinds[:4], ["info", "info", "info", "sep"])
+        wear = {r[2]: r[3] for r in rows if r[0] == "wear"}
+        carts = {r[2]: r[3] for r in rows if r[0] == "cart"}
+        self.assertEqual(wear, {"bow": True, "hat": True})
+        self.assertEqual(carts, {"fialova": True, "mata": False, "ruzova": False})
+        locked = next(r[1] for r in rows if r[2] == "mata")
+        self.assertIn(str(dict(K.REWARDS)["mata"]), locked)
+        app.set_look("classic", NOW)
+        self.assertEqual(app.points_menu()[-1][1], S["new_look_only"])
+        sneaky = self.app({"name": "M",
+                           "wellness": {"total": 3, "wear": ["bow"], "cart": "ruzova"}})
+        ticked = {r[2] for r in sneaky.points_menu() if r[4]}
+        self.assertEqual(ticked, {"fialova"}, "a locked thing is never shown as worn")
+
+    def test_the_look_is_remembered_and_new_by_default(self):
+        app = self.app()
+        self.assertEqual(app.pet.look, "new")
+        app.set_look("classic", NOW)
+        app.set_look("sparkly", NOW)
+        again = K.Companion(self.store.load(), self.store, working_pet(), TODAY, NOW)
+        self.assertEqual(again.pet.look, "classic")
+
+    def test_a_point_redraws_her_with_a_heart(self):
+        app = self.app()
+        app.advance(NOW + 0.1, NOON)
+        self.assertFalse(app.advance(NOW + 0.1, NOON))
+        app.drank(NOW + 0.1)
+        self.assertTrue(app.advance(NOW + 0.1, NOON))
+
+
+class Sprites(unittest.TestCase):
+    """The packed pictures: complete, in range, and turned into images correctly."""
+
+    def test_every_pose_has_a_whole_picture(self):
+        names = {n for pair in K.CUTE.values() for n in pair}
+        names |= {"c_blink", "n_blink", "cart"}
+        self.assertLessEqual(names, set(K.SPRITES))
+        for name, (w, h, bx, by, _) in K.SPRITES.items():
+            idx = K.sprite_indices(name)
+            self.assertEqual(len(idx), w * h, name)
+            self.assertTrue(all(i < len(K.SPRITE_PALETTE) or i == K.CLEAR for i in set(idx)))
+            self.assertTrue(0 <= bx < w and 0 <= by < h, name)
+
+    def test_every_coat_and_cart_recolours_only_what_it_should(self):
+        base = K.SPRITE_PALETTE
+        self.assertIs(K.sprite_palette(), base)
+        for fur in K.PALETTES:
+            for cart in K.CART_COLOURS:
+                pal = K.sprite_palette(fur, cart)
+                self.assertEqual(len(pal), len(base))
+                self.assertTrue(all(len(c) == 7 and c[0] == "#" for c in pal))
+        grey = K.sprite_palette("seda")
+        darkest = min(base, key=lambda c: K._hls(c)[1])
+        self.assertIn(darkest, grey, "outlines stay as drawn")
+        self.assertNotEqual(grey, base)
+        self.assertNotEqual(K.sprite_palette(cart="mata"), base)
+
+    def test_shrinking_and_flipping(self):
+        w, h = K.SPRITES["c_idle"][:2]
+        ow, oh, rows = K.sprite_rgba("c_idle", 0.5)
+        self.assertEqual((ow, oh), (round(w / 2), round(h / 2)))
+        self.assertEqual(len(rows), oh * (ow * 4 + 1))
+        alphas = set(rows[1 + 3::4][:ow])
+        self.assertLessEqual(alphas, {0, 255}, "all or nothing: the colour key can't do half")
+        _, _, flipped = K.sprite_rgba("c_idle", 0.5, flip=True)
+        line = ow * 4 + 1
+        for y in range(0, oh, 7):
+            a, b = rows[y * line + 1:(y + 1) * line], flipped[y * line + 1:(y + 1) * line]
+            px = [a[i:i + 4] for i in range(0, len(a), 4)]
+            self.assertEqual(b"".join(reversed(px)), b)
+
+    def test_png_is_a_real_png(self):
+        import zlib
+        data = K.png(2, 1, b"\0" + b"\xff\0\0\xff" + b"\0\0\0\0")
+        self.assertTrue(data.startswith(b"\x89PNG\r\n\x1a\n"))
+        idat = data.index(b"IDAT")
+        size = int.from_bytes(data[idat - 4:idat], "big")
+        self.assertEqual(zlib.decompress(data[idat + 4:idat + 4 + size]),
+                         b"\0\xff\0\0\xff\0\0\0\0")
+
+    def test_she_blinks_now_and_then(self):
+        p = K.Pet(1000)
+        p.state = "idle"
+        self.assertEqual(K.cute_sprite(p, 1), "c_blink")
+        self.assertEqual(K.cute_sprite(p, 50), "c_idle")
+        p.cart = False
+        self.assertEqual(K.cute_sprite(p, 50), "n_idle")
+        p.state, p.cart = "rest", True
+        self.assertEqual(K.cute_sprite(p, 50), "n_sleep", "she naps out of the cart")
+
+
+class DrawingNew(unittest.TestCase):
+    """The new look draws a picture for every pose, and the props where clicks expect them."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import tkinter as tk
+            cls.root = tk.Tk()
+        except Exception as e:  # ImportError without Tk, TclError without a display
+            raise unittest.SkipTest("no Tk display: %s" % e) from e
+        cls.root.withdraw()
+        cls.tk = tk
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.root.destroy()
+
+    def canvas(self, k=1.0, extra=0):
+        return self.tk.Canvas(self.root, width=int(K.W * k), height=int((K.H + extra) * k))
+
+    def pet(self, state, cart=True, direction=1):
+        p = K.Pet(1000)
+        p.look, p.state, p.cart, p.dir, p.progress = "new", state, cart, direction, 0.8
+        return p
+
+    def test_every_pose_draws_its_picture(self):
+        c = self.canvas()
+        states = sorted(set(K.TRICKS) | {"sleep", "away", "pause"})
+        for state in states:
+            for cart in (True, False):
+                for direction in (1, -1):
+                    p = self.pet(state, cart, direction)
+                    p.say = "mrrr" if direction > 0 else ""
+                    K.draw(c, p, 30)
+                    why = (state, cart, direction)
+                    name = K.cute_sprite(p, 30)
+                    self.assertTrue(c.find_withtag(name), why)
+                    img = c.itemcget(c.find_withtag(name)[0], "image")
+                    w, h = K.SPRITES[name][:2]
+                    self.assertEqual(int(self.root.tk.call("image", "width", img)),
+                                     round(w / K.SPRITE_SCALE), why)
+                    x1, y1, x2, y2 = c.bbox(name)
+                    self.assertTrue(x1 >= 0 and x2 <= K.W + 1 and y2 <= K.GROUND + 2, why)
+                    self.assertEqual(bool(c.find_withtag("bubble")), direction > 0, why)
+                    self.assertEqual(bool(c.find_withtag("bowl")), state == "milk", why)
+                    self.assertEqual(bool(c.find_withtag("grass")), state == "grass", why)
+                    self.assertEqual(bool(c.find_withtag("hairball")), state == "hairball", why)
+                    self.assertEqual(len(c.find_withtag("zzz")),
+                                     3 if state in ("sleep", "away", "rest") else 0, why)
+                    self.assertEqual(bool(c.find_withtag("cart")), state == "rest", why)
+
+    def test_the_bowl_is_drawn_where_a_click_finds_it(self):
+        c = self.canvas()
+        for direction in (1, -1):
+            K.draw(c, self.pet("milk", direction=direction), 30)
+            x1, y1, x2, y2 = c.bbox("bowl")
+            bx1, by1, bx2, by2 = K.bowl_box(direction)
+            for got, want in ((x1, bx1), (y1, by1), (x2, bx2), (y2, by2)):
+                self.assertAlmostEqual(got, want, delta=3)
+
+    def test_what_she_wears_and_her_heart(self):
+        c = self.canvas()
+        p = self.pet("idle")
+        K.draw(c, p, 30)
+        self.assertFalse(c.find_withtag("bow") or c.find_withtag("hat") or c.find_withtag("heart"))
+        p.wear, p.heart_until, p.last_step = ("bow", "hat"), 10.0, 5.0
+        K.draw(c, p, 30)
+        self.assertTrue(c.find_withtag("bow") and c.find_withtag("hat") and c.find_withtag("heart"))
+        hx1, hy1, hx2, hy2 = c.bbox("hat")
+        sx1, sy1, sx2, sy2 = c.bbox("c_idle")
+        self.assertTrue(sx1 < (hx1 + hx2) / 2 < sx2 and hy2 > sy1, "the hat sits on her head")
+
+    def test_zoom_and_scaling_make_her_bigger(self):
+        sizes = []
+        for k in (1.0, 1.5, 2.0):
+            c = self.canvas(k)
+            K.draw(c, self.pet("idle"), 30, k)
+            x1, y1, x2, y2 = c.bbox("c_idle")
+            sizes.append(x2 - x1)
+        self.assertLess(sizes[0], sizes[1])
+        self.assertLess(sizes[1], sizes[2])
+
+    def test_no_text_straight_on_the_see_through_background(self):
+        c = self.canvas()
+        for state in ("sleep", "away", "rest", "idle", "pause"):
+            for k in (1.0, 1.5):
+                p = self.pet(state)
+                p.say = "mrrr"
+                K.draw(c, p, 30, k)
+                loose = [c.itemcget(i, "text") for i in c.find_all() if c.type(i) == "text"
+                         and not set(c.gettags(i)) & {"bubble", "sign"}]
+                self.assertEqual(loose, [], (state, k))
+
+    def test_break_sign_at_full_zoom(self):
+        p = working_pet()
+        p.look = "new"
+        p.start_pause(NOW)
+        p.step(NOW + 9, NOON)
+        k = p.zoom(NOW + 9)
+        c = self.canvas(k, K.PAUSE_EXTRA)
+        K.draw(c, p, 30, k)
+        c.move("all", 0, K.PAUSE_EXTRA * k)
+        K.draw_sign(c, int(K.W * k), k, p, NOW + 9)
+        _, sign_bottom = c.bbox("sign")[1], c.bbox("sign")[3]
+        self.assertLess(sign_bottom, c.bbox("c_paw")[1], "the sign clears her ears")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,10 @@ display on Linux). CI runs all of it on Windows, macOS and Linux.
 
 ![Every pose she has, side by side](preview.png)
 
+She has two looks. The new one is a kawaii cat drawn from a ChatGPT character sheet
+and packed into the file as pictures; the classic one is the original, drawn shape by
+shape in code. Right click, **vzhled**, to switch; she remembers which.
+
 > 🇨🇿 Česká verze návodu je níž: [Česky](#česky)
 
 ---
@@ -56,6 +60,13 @@ Most desktop pets are decoration. This one actually looks after you:
 - **She tells you to stop working** once a day, after 16:00 and only once
   you have put in half an hour of work that day, then lies down. A click puts
   the sign down; right click pushes it back 10 minutes.
+- **She gives you wellness points for real things**, never for screen time: a
+  the hourly break sat through to the end, each glass of water up to the daily goal,
+  today's one thing ticked off, and actually leaving the desk within an hour of
+  the end-of-day sign. In the new look a small heart pops up over her head; that is all. Points
+  are never taken away and she never brings up what you didn't do. They unlock
+  a bow, a hat and new cart colours, and her menu shows the last seven days and
+  your streak (a weekend off doesn't break it).
 
 And in between all that she rolls around, grooms a paw, meows, drinks milk,
 eats grass, coughs up a hairball, climbs out of her cart for a nap, and
@@ -112,7 +123,7 @@ python3-tk` on Debian and Ubuntu).
 |---|---|
 | **Left click** | she gives you a paw and says something; on the end-of-day sign, puts it down |
 | **Drag** | move her along the screen |
-| **Right click** | today's one thing, come here, high five, milk, I drank, say something, take a break, skip the break, break in 10 minutes, cart on/off, rename / recolour, close |
+| **Right click** | today's one thing, come here, high five, milk, I drank, say something, take a break, skip the break, break in 10 minutes, cart on/off, look (new / classic), wellness points and what she wears, rename / recolour, close |
 
 ## Platform support
 
@@ -140,9 +151,10 @@ welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 There is no networking code in `kocicka.py` at all: no `socket`, `urllib` or
 `http`, which you can check with a quick search. What she does touch:
 
-- **`kocka.json`** in your config folder (see above): her name and colour,
-  the day you met, today's one thing, today's water count, and how long you
-  have worked today (so a restart keeps it).
+- **`kocka.json`** in your config folder (see above): her name, colour and
+  look, the day you met, today's one thing, today's water count, how long you
+  have worked today (so a restart keeps it), and your wellness points per day
+  for the last two months with what she has on.
 - **`kocka.lock`** next to it, outside Windows: the process id of the copy
   that is running, so a second copy does not start. On Windows a named mutex
   does the same job and no file is written.
@@ -171,6 +183,8 @@ The constants at the top of `kocicka.py` are meant to be edited:
 | `AWAY_AFTER = 300` | seconds of no input before she assumes you left; time away counts as your break |
 | `SNOOZE = 600` | how far "break in 10 minutes" pushes it, on the clock; the menu wording follows it |
 | `END_AFTER_WORK = 1800` | work today before the end-of-day sign can show |
+| `END_GRACE = 3600` | leave the desk within this long of the end-of-day sign and it counts as finishing on time |
+| `REWARDS` | how many wellness points unlock the bow, the hat and each cart colour |
 | `NIGHT = (22, 7)` | when she dozes: no pep talks or end-of-day sign, but work still counts and breaks still come |
 | `TASKBAR = 40` | macOS and Linux only: raise this if she overlaps your dock or panel |
 
@@ -199,6 +213,8 @@ python -m unittest discover -s tests      # the test suite (drawing tests need a
 ruff check .                              # lint, as CI runs it
 python tools/pose.py                      # every pose side by side, to check the drawing
 python tools/pose.py break                # the break sign, frozen mid-countdown
+python tools/pose.py classic              # the same, in the classic look
+python tools/pose.py dressed              # bow, hat, a grey coat on a mint cart
 python kocicka.py --demo                  # speeds the timers up so you see a break now
 ```
 
@@ -210,7 +226,8 @@ still matches the source.
 ## Česky
 
 Kočička na vozíčku, která ti jezdí po spodku obrazovky, dělá ti společnost
-při práci a jednou za hodinu tě zvedne od stolu.
+při práci a jednou za hodinu tě zvedne od stolu. Je nová a roztomilá, a když se
+ti zasteskne po té staré, přepneš si v menu `vzhled` na klasický.
 
 Jeden soubor, jen standardní knihovna Pythonu. Nic neinstaluje, nic neposílá
 na internet, nic o tobě nesbírá.
@@ -227,7 +244,9 @@ barvu a jméno, pak už naskakuje rovnou. Kdo nechce řešit GitHub, pošli mu
 vyblije chlupy, občas vyleze z vozíku a zdřímne si vedle něj. Každých pár
 minut ti řekne něco povzbuzujícího. Jednou za hodinu **skutečné práce** tě
 zastaví, zvedne ceduli STOP a vede tě protahováním a dýcháním 4-7-8.
-Odpoledne ti řekne, ať to zavřeš. Pozná, když nejsi u počítače, a schová se,
+Odpoledne ti řekne, ať to zavřeš. Za dokončenou hodinovou pauzu, vodu, odškrtnutou
+věc dne a konec práce včas dává wellness body, za které odemkneš mašličku,
+čepičku a barvu vozíčku. Body nikdy nebere a nic nevyčítá. Pozná, když nejsi u počítače, a schová se,
 když je vepředu aplikace přes celou obrazovku (prezentace, hovor nebo video
 na celou obrazovku). Jestli sdílíš obrazovku, poznat neumí: když sdílíš
 obyčejné okno nebo celou plochu, zůstane vidět.
